@@ -1,0 +1,2 @@
+regex:OPENAI_API_KEY\s*=\s*sk-[A-Za-z0-9_\-]+==>OPENAI_API_KEY=sk-REDACTED
+regex:TELEGRAM_BOT_TOKEN\s*=[0-9]+:[A-Za-z0-9_\-]+==>TELEGRAM_BOT_TOKEN=REDACTED

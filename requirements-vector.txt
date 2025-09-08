@@ -1,0 +1,31 @@
+# Дополнительные зависимости для векторной памяти и embeddings
+
+# Vector database and embeddings
+faiss-cpu==1.7.4
+chromadb==0.4.22
+sentence-transformers==2.3.1
+
+# Alternative vector stores
+pinecone-client==3.2.2
+weaviate-client==4.5.4
+
+# Embeddings providers
+openai==1.101.0  # already in main requirements
+cohere==4.56
+
+# Document processing and chunking
+langchain-text-splitters==0.2.4
+pymupdf==1.23.26
+python-docx==1.1.0
+
+# In-memory vector stores for development
+numpy>=1.24.0
+scikit-learn>=1.3.0
+
+# pgvector (PostgreSQL with vector support) - уже есть psycopg2
+pgvector==0.2.4
+
+# Additional LangChain vector store integrations
+langchain-community==0.2.16
+langchain-chroma==0.1.4
+langchain-pinecone==0.1.3

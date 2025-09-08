@@ -1,0 +1,105 @@
+version: '3.8'
+
+services:
+  # Flask API Application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.app
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=development
+      - DEBUG=true
+      - DATABASE_URL=postgresql://agatha:agatha@postgres:5432/agatha
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - HOST=0.0.0.0
+      - PORT=5000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app:ro
+      - ./swagger.json:/app/swagger.json:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Telegram Bot (optional)
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.app
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - API_BASE_URL=http://app:5000
+      - BOT_ADMIN_USERS=${BOT_ADMIN_USERS:-[]}
+    depends_on:
+      app:
+        condition: service_healthy
+    command: ["python", "-m", "app.bots.telegram_bot"]
+    restart: unless-stopped
+
+  # Celery Worker
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      - DATABASE_URL=postgresql://agatha:agatha@postgres:5432/agatha
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app:ro
+    restart: unless-stopped
+
+  # Redis for caching and Celery broker
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # PostgreSQL with pgvector extension
+  postgres:
+    image: pgvector/pgvector:pg15
+    environment:
+      - POSTGRES_DB=agatha
+      - POSTGRES_USER=agatha
+      - POSTGRES_PASSWORD=agatha
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agatha -d agatha"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_data:
+  redis_data: 

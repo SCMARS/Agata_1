@@ -1,0 +1,45 @@
+# Конфигурация для MemoryLevelsManager
+# Настройки для 4-уровневой системы памяти
+
+# Short-Term Memory
+short_term:
+  enabled: true
+  max_messages: 15
+  provider: "enhanced_buffer"
+  window_size: 10
+
+# Long-Term Memory
+long_term:
+  enabled: true
+  provider: "intelligent_vector"
+  min_importance: 0.1  
+  max_storage_items: 10000
+  embedding_model: "text-embedding-3-small"
+
+# Episodic Memory
+episodic:
+  enabled: true
+  auto_save_episodes: true
+  episode_min_messages: 5
+  episode_timeout_minutes: 30
+
+# Summary Memory  
+summary:
+  enabled: true
+  auto_summarize: true
+  trigger_message_count: 50
+  max_summary_length: 500
+  summarizer_model: "gpt-4o-mini"
+
+# Search Settings
+search_settings:
+  min_importance: 0.1  # Очень низкий порог для поиска
+  max_results: 5
+  similarity_threshold: 0.6
+  hybrid_search: true
+
+# Debug Settings
+debug:
+  log_memory_operations: true
+  log_importance_calculations: true
+  log_search_results: true

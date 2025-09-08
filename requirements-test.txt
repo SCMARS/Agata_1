@@ -1,0 +1,13 @@
+# Базовые зависимости
+flask==3.0.0
+flask-cors==4.0.0
+python-dotenv==1.0.0
+pyyaml==6.0.1
+pydantic==2.5.2
+
+# LangChain ecosystem - совместимые версии
+langchain-core==0.1.25
+langgraph==0.0.25
+
+# Для тестирования без OpenAI
+requests==2.31.0 

@@ -1,0 +1,27 @@
+# Environment files with secrets
+config.env
+.env
+.env.local
+.env.production
+# Local artifacts
+.env
+.env.*
+*.log
+*.pid
+server.out
+bot.out
+simple_telegram_bot.log
+
+# Data
+data/
+**/chroma.sqlite3
+**/*.bin
+
+# Python cache
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# Notebooks/large
+*.ipynb
+

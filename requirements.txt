@@ -1,0 +1,39 @@
+# Flask and API
+flask==3.0.0
+flask-cors==4.0.0
+gunicorn==21.2.0
+
+# Database
+sqlalchemy==1.4.53
+psycopg2-binary>=2.9.9
+
+# Redis and Celery
+redis==5.0.1
+celery==5.3.4
+
+# LangChain and LangGraph (СОВМЕСТИМЫЕ ВЕРСИИ)
+langchain-core==0.2.43
+langchain-openai==0.1.14
+langgraph==0.2.50
+langsmith==0.1.147
+
+# OpenAI (НОВЫЙ API)
+openai==1.101.0
+
+# Memory and document processing
+tiktoken==0.11.0
+
+# Utilities
+pydantic==2.11.7
+python-dotenv==1.0.0
+pyyaml==6.0.1
+requests==2.31.0
+
+# Additional dependencies for LangChain
+aiohttp>=3.8.3,<4.0.0
+dataclasses-json>=0.5.7,<0.7
+numpy>=1,<2
+
+# Development
+pytest==7.4.3
+pytest-asyncio==0.21.1 

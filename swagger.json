@@ -1,0 +1,282 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Agatha AI Companion API",
+    "description": "API для виртуального ИИ-компаньона Agatha с модульной архитектурой на основе LangGraph",
+    "version": "1.0.0",
+    "contact": {
+      "name": "Agatha Team"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:5000",
+      "description": "Development server"
+    }
+  ],
+  "paths": {
+    "/healthz": {
+      "get": {
+        "summary": "Health check endpoint",
+        "description": "Проверка состояния сервиса",
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/readyz": {
+      "get": {
+        "summary": "Readiness check endpoint",
+        "description": "Проверка готовности сервиса к обработке запросов",
+        "responses": {
+          "200": {
+            "description": "Service is ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service is not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/info": {
+      "get": {
+        "summary": "API information",
+        "description": "Информация о API и доступных endpoints",
+        "responses": {
+          "200": {
+            "description": "API information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiInfoResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/chat": {
+      "post": {
+        "summary": "Chat with Agatha",
+        "description": "Основной endpoint для общения с Agatha",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Chat response from Agatha",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "healthy"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "service": {
+            "type": "string",
+            "example": "agatha-api"
+          }
+        }
+      },
+      "ReadinessResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["ready", "not_ready"]
+          },
+          "checks": {
+            "type": "object",
+            "properties": {
+              "database": {
+                "type": "string",
+                "example": "ok"
+              },
+              "redis": {
+                "type": "string",
+                "example": "ok"
+              },
+              "llm": {
+                "type": "string",
+                "example": "ok"
+              }
+            }
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error": {
+            "type": "string",
+            "description": "Error message if status is not_ready"
+          }
+        }
+      },
+      "ApiInfoResponse": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Agatha AI Companion API"
+          },
+          "version": {
+            "type": "string",
+            "example": "1.0.0"
+          },
+          "description": {
+            "type": "string"
+          },
+          "endpoints": {
+            "type": "object"
+          }
+        }
+      },
+      "ChatRequest": {
+        "type": "object",
+        "required": ["user_id", "messages"],
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "description": "Уникальный идентификатор пользователя",
+            "example": "user_123"
+          },
+          "messages": {
+            "type": "array",
+            "description": "Массив сообщений в диалоге",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          },
+          "metaTime": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Метаданные времени (опционально)"
+          }
+        }
+      },
+      "Message": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": ["user", "assistant"],
+            "description": "Роль отправителя сообщения"
+          },
+          "content": {
+            "type": "string",
+            "description": "Текст сообщения"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Время отправки сообщения"
+          }
+        }
+      },
+      "ChatResponse": {
+        "type": "object",
+        "properties": {
+          "parts": {
+            "type": "array",
+            "description": "Массив частей ответа (1-3 части)",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 3
+          },
+          "has_question": {
+            "type": "boolean",
+            "description": "Содержит ли ответ вопрос"
+          },
+          "delays_ms": {
+            "type": "array",
+            "description": "Задержки между частями ответа в миллисекундах",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Описание ошибки"
+          }
+        }
+      }
+    }
+  }
+} 

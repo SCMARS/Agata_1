@@ -1,0 +1,218 @@
+# Системные настройки по умолчанию без хардкода
+# Все значения должны перекрываться через переменные окружения или config_versions
+
+system:
+  # Сетевые настройки
+  networking:
+    default_host: "0.0.0.0"  # Загружается из HOST env var
+    default_port: 8000       # Загружается из PORT env var
+    timeout_seconds: 30
+    connection_pool_size: 10
+    max_connections: 100
+    
+  # База данных
+  database:
+    default_host: "localhost"      # Загружается из DB_HOST
+    default_port: 5432            # Загружается из DB_PORT
+    default_name: "agata_db"      # Загружается из DB_NAME
+    default_user: "postgres"      # Загружается из DB_USER
+    connection_timeout: 10
+    pool_min_connections: 2
+    pool_max_connections: 20
+    statement_timeout: "30s"
+    idle_in_transaction_timeout: "60s"
+    
+  # Векторная база данных
+  vector_defaults:
+    default_embedding_dimension: 1536
+    default_distance_metric: "l2"
+    default_table_name: "vector_memories"
+    default_embedding_column: "embedding"
+    
+    index_defaults:
+      ivfflat_lists: 100
+      hnsw_m: 16
+      hnsw_ef_construction: 200
+      
+    search_defaults:
+      default_similarity_threshold: 0.7
+      default_search_limit: 10
+      max_fact_results: 10
+      max_episode_results: 5
+      
+
+  thresholds:
+    memory:
+      semantic_similarity: 0.5
+      fact_confidence_min: 0.7
+      importance_threshold: 0.3
+      episodic_threshold: 0.4
+      summary_threshold: 0.3
+      
+    search:
+      fact_similarity_threshold: 0.3
+      episode_similarity_threshold: 0.4
+      default_similarity: 0.3
+      
+    weights:
+      deterministic_facts: 1.0
+      fuzzy_text: 0.7
+      semantic_vector: 0.6
+      importance_boost: 0.1
+      
+ 
+  limits:
+    max_message_length: 4096
+    max_fact_length: 1000
+    max_episode_length: 10000
+    max_cache_size: 1000
+    max_search_results: 50
+    buffer_size: 15
+    vector_memory_size: 1000
+    
+    # Строковые лимиты для БД
+    user_id_length: 100
+    role_length: 20
+    category_length: 50
+    importance_length: 10
+    session_id_length: 100
+    language_length: 10
+    
+  # Временные интервалы
+  timeouts:
+    cache_ttl_seconds: 300
+    session_timeout_hours: 24
+    cleanup_interval_hours: 6
+    metrics_retention_days: 30
+    
+  # Языки и локализация
+  languages:
+    default: "ru"
+    supported: ["ru", "en"]
+    fallback_language: "en"
+    
+  # Логирование
+  logging:
+    default_level: "INFO"
+    default_format: "[%(asctime)s] %(name)s [%(levelname)s] %(message)s"
+    max_log_size_mb: 100
+    backup_count: 5
+    
+  # API ключи и токены (шаблоны переменных окружения)
+  api_keys:
+    openai_key_env: "OPENAI_API_KEY"
+    telegram_token_env: "TELEGRAM_BOT_TOKEN"
+    database_url_env: "DATABASE_URL"
+    
+  # Значения по умолчанию для JSON полей
+  json_defaults:
+    empty_array: []
+    empty_object: {}
+    default_topics: []
+    default_emotions: []
+    default_metadata: {}
+    
+# Конфигурация памяти (заменяет хардкод из production_memory_system.py)
+memory_config:
+  extraction:
+    # Паттерны интентов (заменяют хардкод)
+    intent_patterns:
+      personal_info:
+        - "меня зовут"
+        - "мое имя"
+        - "я ([а-яёА-ЯЁ]+)"
+        - "зовите меня"
+      
+      relationships:
+        - "мой друг"
+        - "моя подруга"
+        - "мой коллега"
+        - "мой брат"
+        - "моя сестра"
+        
+      preferences:
+        - "мне нравится"
+        - "я люблю"
+        - "предпочитаю"
+        - "не люблю"
+        
+      work:
+        - "я работаю"
+        - "моя работа"
+        - "моя профессия"
+        - "в офисе"
+        
+    # Ключевые слова для тем (заменяют хардкод)
+    topic_keywords:
+      работа: ["работ", "профессия", "карьер", "офис", "компания", "коллег"]
+      семья: ["семья", "родители", "дети", "муж", "жена", "мама", "папа"]
+      хобби: ["увлекаюсь", "люблю", "хобби", "интерес", "свободное время"]
+      здоровье: ["здоровье", "самочувствие", "болезнь", "лечение", "врач"]
+      путешествия: ["путешеств", "отпуск", "страна", "город", "поездка"]
+      образование: ["учусь", "университет", "школа", "курс", "обучение"]
+      
+    # Индикаторы важности (заменяют хардкод)
+    importance_indicators:
+      high: ["важно", "критично", "срочно", "обязательно", "необходимо"]
+      medium: ["нужно", "желательно", "стоит", "лучше"]
+      low: ["может быть", "возможно", "иногда", "если получится"]
+      
+  # Категории и веса
+  categories:
+    fact_categories:
+      personal: 1.0
+      professional: 0.9
+      social: 0.8
+      preferences: 0.7
+      general: 0.5
+      
+    importance_weights:
+      personal_info: 1.0
+      relationships: 0.9
+      work_info: 0.8
+      preferences: 0.7
+      casual: 0.5
+      
+# Конфигурация поиска
+search_config:
+  # Настройки гибридного поиска
+  hybrid_search:
+    use_semantic: true
+    use_keyword: true
+    use_fuzzy: true
+    
+    weights:
+      semantic_weight: 0.6
+      keyword_weight: 0.3
+      fuzzy_weight: 0.1
+      
+  # Настройки полнотекстового поиска
+  fulltext:
+    use_fulltext_search: true
+    language_configs:
+      ru: "russian"
+      en: "english"
+      default: "simple"
+      
+  # Пороги релевантности
+  relevance_thresholds:
+    high_relevance: 0.8
+    medium_relevance: 0.6
+    low_relevance: 0.3
+    minimum_relevance: 0.1
+
+# Конфигурация Telegram бота
+telegram_bot:
+  rate_limits:
+    messages_per_minute: 20
+    commands_per_hour: 100
+    admin_commands_per_hour: 200
+    
+  permissions:
+    admin_commands: ["config", "metrics", "admin_help"]
+    user_commands: ["start", "help", "status", "test_memory", "test_search"]
+    
+  message_limits:
+    max_message_length: 4096
+    max_search_results: 5
+    max_context_display: 3
