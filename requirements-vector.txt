@@ -1,7 +1,8 @@
 # Дополнительные зависимости для векторной памяти и embeddings
 
 # Vector database and embeddings
-faiss-cpu==1.7.4
+# FAISS: use newer wheels where available; skip on unsupported platforms
+faiss-cpu>=1.10.0; (platform_system == "Linux") or (platform_machine == "x86_64")
 chromadb==0.4.22
 sentence-transformers==2.3.1
 

@@ -1,9 +1,11 @@
 {
 	"folders": [
 		{
+			"name": "Agata",
 			"path": "../../.."
 		},
 		{
+			"name": "stages",
 			"path": "../../../../Downloads/stages"
 		}
 	],
