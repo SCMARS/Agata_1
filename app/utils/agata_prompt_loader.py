@@ -133,9 +133,25 @@ class AgataPromptLoader:
             return self._get_fallback_stage_prompt(stage_number)
     
     def create_system_prompt(self, stage_number: int = 1, day_number: int = 1, memory_context: str = "") -> str:
-        """Создает системный промпт, объединяя биографию, стиль, этап и ограниченное знание"""
+        """Создает системный промпт, используя новый живой стиль общения"""
         
-        # Загружаем компоненты
+        # Загружаем новый системный промпт из config/prompts/system_core.txt
+        system_core_path = "config/prompts/system_core.txt"
+        if os.path.exists(system_core_path):
+            try:
+                with open(system_core_path, 'r', encoding='utf-8') as f:
+                    system_prompt = f.read().strip()
+                    # Добавляем информацию о дне в промпт
+                    day_prompt = self._get_day_prompt(day_number)
+                    day_info = f"\n\n=== ТЕКУЩИЙ ДЕНЬ ОБЩЕНИЯ ===\n{day_prompt}\n"
+                    system_prompt = system_prompt.replace("=== ТЕКУЩИЙ ЭТАП ОБЩЕНИЯ ===", f"{day_info}=== ТЕКУЩИЙ ЭТАП ОБЩЕНИЯ ===")
+                    logger.info(f"Загружен новый системный промпт из {system_core_path} с днем {day_number}")
+                    return system_prompt
+            except Exception as e:
+                logger.error(f"Ошибка загрузки {system_core_path}: {e}")
+        
+        # Fallback к старому методу
+        logger.warning("Используем fallback системный промпт")
         bio = self.load_persona_bio()
         style_guidelines = self.load_style_guidelines()
         stage_prompt = self.load_stage_prompt(stage_number)
@@ -178,7 +194,7 @@ class AgataPromptLoader:
 ИСПОЛЬЗУЙ ТОЛЬКО ЭТУ ИНФОРМАЦИЮ для ответов о пользователе, НЕ свою биографию.
 """
         
-        logger.info(f"Создан системный промпт для дня {day_number}, этапа {stage_number}")
+        logger.info(f"Создан fallback системный промпт для дня {day_number}, этапа {stage_number}")
         return system_prompt
     
     def _get_fallback_bio(self) -> str:
@@ -207,6 +223,31 @@ class AgataPromptLoader:
         self.style_cache.clear() 
         self.stage_cache.clear()
         logger.info("Кеш промптов очищен")
+    
+    def _get_day_prompt(self, day_number: int) -> str:
+        """Получить промпт для конкретного дня"""
+        try:
+            # Определяем файл промпта для дня
+            if day_number <= 7:
+                prompt_file = f"day_{day_number}.txt"
+            elif day_number <= 14:
+                prompt_file = "day_7.txt"
+            elif day_number <= 30:
+                prompt_file = "day_7.txt"  # Используем day_7 для всех дней 8-30
+            else:
+                prompt_file = "day_7.txt"  # Для дней 30+
+            
+            prompt_path = os.path.join("config", "prompts", prompt_file)
+            
+            if os.path.exists(prompt_path):
+                with open(prompt_path, 'r', encoding='utf-8') as f:
+                    return f"День {day_number} знакомства\n\n{f.read().strip()}"
+            else:
+                return f"День {day_number} знакомства"
+                
+        except Exception as e:
+            logger.error(f"Ошибка загрузки day_{day_number} prompt: {e}")
+            return f"День {day_number} знакомства"
 
 # Глобальный экземпляр загрузчика
 agata_loader = AgataPromptLoader()

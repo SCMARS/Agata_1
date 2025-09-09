@@ -21,6 +21,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY app/ ./app/
+COPY agata_prompt_data/ ./agata_prompt_data/
+COPY config/ ./config/
 
 # Create non-root user
 RUN useradd --create-home --shell /bin/bash agatha
@@ -28,4 +30,4 @@ RUN chown -R agatha:agatha /app
 USER agatha
 
 # Run Celery worker
-CMD ["celery", "-A", "app.workers.celery_app", "worker", "--loglevel=info"] 
+CMD ["celery", "-A", "app.worker.celery_app", "worker", "--loglevel=info", "--concurrency=2"]

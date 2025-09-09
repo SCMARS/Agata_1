@@ -305,7 +305,7 @@ class ProductionTelegramBot:
             )
     
     async def _handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обработчик обычных сообщений"""
+        
         user_id = update.effective_user.id
         message_text = update.message.text
         
@@ -314,16 +314,65 @@ class ProductionTelegramBot:
             await update.message.reply_text("⏰ Слишком много сообщений. Подождите немного.")
             return
         
-        # Отправляем сообщение в чат API
+        # Инициализируем буфер сообщений для пользователя
+        if not hasattr(self, 'user_message_buffers'):
+            self.user_message_buffers = {}
+        
+        if user_id not in self.user_message_buffers:
+            self.user_message_buffers[user_id] = {
+                'messages': [],
+                'last_message_time': None,
+                'timer_task': None
+            }
+        
+        # Добавляем сообщение в буфер
+        current_time = datetime.now()
+        self.user_message_buffers[user_id]['messages'].append({
+            "role": "user", 
+            "content": message_text,
+            "timestamp": current_time
+        })
+        self.user_message_buffers[user_id]['last_message_time'] = current_time
+        
+        self.logger.info(f"📝 Добавлено сообщение в буфер для {user_id}: '{message_text}'")
+        self.logger.info(f"📊 Всего в буфере: {len(self.user_message_buffers[user_id]['messages'])} сообщений")
+        
+        # Отменяем предыдущий таймер, если есть
+        if self.user_message_buffers[user_id]['timer_task']:
+            self.user_message_buffers[user_id]['timer_task'].cancel()
+        
+        # Устанавливаем новый таймер на 10 секунд
+        chat_id = update.effective_chat.id
+        self.user_message_buffers[user_id]['chat_id'] = chat_id
+        self.user_message_buffers[user_id]['timer_task'] = asyncio.create_task(
+            self._process_buffered_messages(user_id)
+        )
+    
+    async def _process_buffered_messages(self, user_id: int):
+        """Обрабатывает буферизованные сообщения после задержки"""
         try:
-            self.logger.info(f"🔄 Отправляем запрос к chat API для пользователя {user_id}")
+            # Ждем 10 секунд
+            await asyncio.sleep(10)
             
+            if user_id not in self.user_message_buffers:
+                return
+            
+            buffer = self.user_message_buffers[user_id]
+            messages = buffer['messages']
+            chat_id = buffer.get('chat_id')
+            
+            if not messages or not chat_id:
+                return
+            
+            self.logger.info(f"⏰ Обрабатываем {len(messages)} буферизованных сообщений для {user_id}")
+            
+            # Отправляем все сообщения в чат API
             async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
                 response = await client.post(
                     f"{self.api_base_url}/api/chat",
                     json={
                         "user_id": str(user_id),
-                        "messages": [{"role": "user", "content": message_text}]
+                        "messages": [{"role": msg["role"], "content": msg["content"]} for msg in messages]
                     }
                 )
             
@@ -332,34 +381,54 @@ class ProductionTelegramBot:
             if response.status_code == 200:
                 chat_response = response.json()
                 parts = chat_response.get("parts", [])
+                delays_ms = chat_response.get("delays_ms", [])
+                
                 self.logger.info(f"🧠 Получены части ответа: {len(parts)}")
                 
-                # Отправляем ответ частями
+
                 for i, part in enumerate(parts):
-                    if i == 0:
-                        await update.message.reply_text(part)
-                        self.logger.info(f"✅ Отправляем ответ от AI: {part[:50]}...")
-                    else:
-                        await update.message.reply_text(part)
+                    # Используем задержку из API или стандартную
+                    delay = delays_ms[i] / 1000 if i < len(delays_ms) else 0.5
                     
-                    # Небольшая задержка между частями
-                    if i < len(parts) - 1:
-                        await asyncio.sleep(0.5)
-            else:
-                await update.message.reply_text(
-                    self.config.messages["error_generic"].format(error=f"HTTP {response.status_code}")
-                )
+                    if i > 0:
+                        await asyncio.sleep(delay)
+                    
+                    # Отправляем через bot API
+                    from telegram import Bot
+                    bot = Bot(token=self.config.token)
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=part
+                    )
+                    self.logger.info(f"✅ Отправлена часть {i+1}: {part[:50]}...")
                 
-        except httpx.ReadTimeout:
-            await update.message.reply_text(
-                "⏳ Сервер долго отвечает. Попробуй ещё раз чуть позже."
-            )
+                # Очищаем буфер после успешной обработки
+                self.user_message_buffers[user_id]['messages'] = []
+                
+            else:
+                # Ошибка API
+                self.logger.error(f"❌ Chat API вернул ошибку: {response.status_code}")
+                from telegram import Bot
+                bot = Bot(token=self.config.bot_token)
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text="😔 Извини, что-то пошло не так. Попробуй еще раз."
+                )
+                # Очищаем буфер при ошибке
+                self.user_message_buffers[user_id]['messages'] = []
+                
         except Exception as e:
-            self.logger.error(f"Ошибка обработки сообщения: {e}")
-            self.logger.error(f"Traceback: {traceback.format_exc()}")
-            await update.message.reply_text(
-                self.config.messages["error_generic"].format(error=str(e))
-            )
+            self.logger.error(f"❌ Ошибка обработки буферизованных сообщений для {user_id}: {e}")
+            if user_id in self.user_message_buffers:
+                chat_id = self.user_message_buffers[user_id].get('chat_id')
+                if chat_id:
+                    from telegram import Bot
+                    bot = Bot(token=self.config.token)
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text="😔 Извини, что-то пошло не так. Попробуй еще раз."
+                    )
+                self.user_message_buffers[user_id]['messages'] = []
     
     def _check_rate_limit(self, user_id: int, action: str) -> bool:
         """Проверяет rate limiting"""

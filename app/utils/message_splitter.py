@@ -5,29 +5,26 @@ import re
 import random
 import logging
 from typing import List, Dict, Tuple
+from .living_chat_config_loader import living_chat_config
 
 logger = logging.getLogger(__name__)
 
 class MessageSplitter:
-    """Система разбиения сообщений на логические части"""
+    """Система разбиения сообщений на логические части для живого общения"""
     
-    def __init__(self, max_length: int = 200):
-        self.max_length = max_length
-        self.min_delay = 800   # мс
-        self.max_delay = 2500  # мс
+    def __init__(self):
+        # Загружаем конфигурацию
+        self.config = living_chat_config
+        self.message_splitting_config = self.config.get_message_splitting_config()
+        
+        # Настройки из конфигурации
+        self.max_length = self.message_splitting_config.get("max_length", 150)
+        self.min_delay = self.message_splitting_config.get("min_delay_ms", 500)
+        self.max_delay = self.message_splitting_config.get("max_delay_ms", 2000)
+        self.force_split_threshold = self.message_splitting_config.get("force_split_threshold", 100)
+        self.max_parts = self.message_splitting_config.get("max_parts", 3)
     
     def split_message(self, text: str, force_split: bool = False) -> Dict[str, any]:
-        """
-        Разбивает сообщение на 1-3 логические части
-        
-        Args:
-            text: Исходный текст сообщения
-            force_split: Принудительно разбить на части
-            
-        Returns:
-            Dict с частями сообщения, флагом наличия вопроса и задержками
-        """
-        # Очищаем текст
         text = text.strip()
         
         if not text:
@@ -41,18 +38,27 @@ class MessageSplitter:
         has_question = self._has_question(text)
         
         # Если текст короткий и нет принуждения к разбиению
-        if len(text) <= self.max_length and not force_split:
+        if len(text) <= self.max_length and not force_split and len(text) <= self.force_split_threshold:
             return {
                 'parts': [text],
                 'has_question': has_question,
                 'delays_ms': [self._generate_delay()]
             }
         
+        # Принудительно разбиваем длинные сообщения для живого общения
+        if len(text) > self.force_split_threshold or force_split:
+            force_split = True
+        
         # Разбиваем на части
         parts = self._split_into_parts(text)
         delays = [self._generate_delay() for _ in parts]
         
-        logger.info(f"Разбили сообщение на {len(parts)} частей")
+        logger.info(f"✂️ [SPLITTER] Разбили сообщение на {len(parts)} частей")
+        for i, part in enumerate(parts, 1):
+            logger.info(f"   📝 Часть {i}: '{part[:50]}{'...' if len(part) > 50 else ''}'")
+        logger.info(f"   ❓ Есть вопрос: {has_question}")
+        logger.info(f"   ⏱️ Задержки: {delays}мс")
+        
         return {
             'parts': parts,
             'has_question': has_question,
@@ -60,14 +66,14 @@ class MessageSplitter:
         }
     
     def _split_into_parts(self, text: str) -> List[str]:
-        """Разбивает текст на логические части"""
+        """Разбивает текст на логические части для живого общения"""
         
         # Сначала пробуем разбить по естественным границам
         parts = self._split_by_sentences(text)
         
         # Если получилось слишком много частей, объединяем
-        if len(parts) > 3:
-            parts = self._merge_short_parts(parts, max_parts=3)
+        if len(parts) > self.max_parts:
+            parts = self._merge_short_parts(parts)
         
         # Если части слишком длинные, дополнительно разбиваем
         final_parts = []
@@ -78,9 +84,12 @@ class MessageSplitter:
             else:
                 final_parts.append(part)
         
-        # Ограничиваем до 3 частей максимум
-        if len(final_parts) > 3:
-            final_parts = final_parts[:3]
+        # Ограничиваем до максимального количества частей из конфигурации
+        if len(final_parts) > self.max_parts:
+            final_parts = final_parts[:self.max_parts]
+        
+        # Добавляем естественность - делаем части более короткими и живыми
+        final_parts = self._make_parts_livelier(final_parts)
         
         return final_parts
     
@@ -128,9 +137,12 @@ class MessageSplitter:
         
         return parts
     
-    def _merge_short_parts(self, parts: List[str], max_parts: int = 3) -> List[str]:
+    def _merge_short_parts(self, parts: List[str], max_parts: int = None) -> List[str]:
         """Объединяет короткие части до достижения максимального количества"""
         
+        if max_parts is None:
+            max_parts = self.max_parts
+            
         if len(parts) <= max_parts:
             return parts
         
@@ -193,10 +205,24 @@ class MessageSplitter:
         text_mid = len(text) // 2
         best_point = min(break_points, key=lambda x: abs(x - text_mid))
         
-        return [
-            text[:best_point].strip(),
-            text[best_point:].strip()
-        ]
+        part1 = text[:best_point].strip()
+        part2 = text[best_point:].strip()
+
+        if self._is_short_start(part1):
+            # Переміщуємо коротке слово до другої частини
+            words = text.split()
+            if len(words) > 2:
+                return [
+                    ' '.join(words[:2]),  
+                    ' '.join(words[2:])
+                ]
+        
+        return [part1, part2]
+    
+    def _is_short_start(self, text: str) -> bool:
+        """Перевіряє, чи починається текст з короткого слова"""
+        short_starts = ['О,', 'Да,', 'Нет,', 'Ой,', 'Ах,', 'Ох,', 'Эх,', 'Ну,', 'И,', 'А,']
+        return any(text.strip().startswith(start) for start in short_starts)
     
     def _has_question(self, text: str) -> bool:
         """Проверяет наличие вопросов в тексте"""
@@ -204,6 +230,39 @@ class MessageSplitter:
         text_lower = text.lower()
         
         return any(marker in text_lower for marker in question_markers)
+    
+    def _make_parts_livelier(self, parts: List[str]) -> List[str]:
+        
+        livelier_parts = []
+        
+        for i, part in enumerate(parts):
+            part = part.strip()
+            
+            # Если часть слишком длинная, разбиваем на более короткие
+            if len(part) > self.force_split_threshold:
+                # Ищем естественные места для разбиения
+                if ', ' in part:
+                    sub_parts = part.split(', ', 1)
+                    livelier_parts.extend([sub_parts[0] + ',', sub_parts[1]])
+                elif ' и ' in part:
+                    sub_parts = part.split(' и ', 1)
+                    livelier_parts.extend([sub_parts[0], 'И ' + sub_parts[1]])
+                elif ' но ' in part:
+                    sub_parts = part.split(' но ', 1)
+                    livelier_parts.extend([sub_parts[0], 'Но ' + sub_parts[1]])
+                else:
+                    # Принудительно разбиваем по словам
+                    words = part.split()
+                    mid = len(words) // 2
+                    livelier_parts.extend([
+                        ' '.join(words[:mid]),
+                        ' '.join(words[mid:])
+                    ])
+            else:
+                livelier_parts.append(part)
+        
+        # Ограничиваем до максимального количества частей из конфигурации
+        return livelier_parts[:self.max_parts]
     
     def _generate_delay(self) -> int:
         """Генерирует случайную задержку для отправки сообщения"""

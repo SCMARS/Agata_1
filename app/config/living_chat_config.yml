@@ -1,0 +1,39 @@
+# Конфигурация живого общения
+living_chat:
+  # Настройки разбиения сообщений
+  message_splitting:
+    max_length: 120  # Збільшуємо довжину
+    force_split_threshold: 80  # Збільшуємо поріг
+    min_delay_ms: 2000  # 2 секунди
+    max_delay_ms: 5000  # 5 секунд
+    max_parts: 3  # Максимум 3 части
+  
+  # Настройки коротких сообщений
+  short_messages:
+    max_wait_seconds: 10  # Уменьшаем время ожидания
+    short_message_threshold: 50  # символов
+    quick_sequence_threshold: 3  # секунд между сообщениями (быстрее объединение)
+    
+
+  # Динамічна генерація замість хардкоду
+  dynamic_generation:
+    enabled: true
+    use_openai_for_questions: true
+    use_openai_for_emotions: true
+    use_openai_for_connectors: true
+    cache_duration_minutes: 30
+    
+  # Базові часові діапазони
+  time_ranges:
+    morning: [6, 12]
+    day: [12, 18]
+    evening: [18, 22]
+    night: [22, 6]
+  
+  # Стиль общения
+  communication_style:
+    use_emojis: true 
+    use_parentheses: false  
+    use_contractions: true 
+    max_emoji_per_message: 1
+    casual_expressions: true

@@ -1,188 +1,119 @@
--- Agatha Database Schema
--- PostgreSQL initialization script
+-- Agatha AI Companion Database Initialization
+-- Створення бази даних для PostgreSQL з pgvector
 
--- Enable UUID extension
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
--- Enable pgvector extension для VECTOR типа
+-- Створюємо розширення pgvector для векторних операцій
 CREATE EXTENSION IF NOT EXISTS vector;
 
--- Users table
-CREATE TABLE users (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id VARCHAR(255) UNIQUE NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
-    -- User profile data
-    name VARCHAR(255),
-    preferences JSONB DEFAULT '{}',
-    communication_style JSONB DEFAULT '{}',
-    interests TEXT[],
-    
-    -- Conversation tracking
-    total_messages INTEGER DEFAULT 0,
-    days_since_start INTEGER DEFAULT 1,
-    last_activity TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
-    -- Behavioral adaptation
-    current_strategy VARCHAR(50) DEFAULT 'caring',
-    question_count INTEGER DEFAULT 0,
-    
-    -- Metadata
-    timezone VARCHAR(50) DEFAULT 'UTC',
-    language VARCHAR(10) DEFAULT 'ru'
+-- Створюємо таблиці для системи пам'яті
+
+-- Таблиця для коротко-строкової пам'яті
+CREATE TABLE IF NOT EXISTS short_term_memory (
+    id SERIAL PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    message TEXT NOT NULL,
+    role VARCHAR(50) NOT NULL,
+    timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    metadata JSONB DEFAULT '{}',
+    INDEX(user_id, timestamp)
 );
 
--- Conversations table
-CREATE TABLE conversations (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
-    -- Conversation metadata
-    day_number INTEGER NOT NULL,
-    session_id VARCHAR(255),
-    context JSONB DEFAULT '{}',
-    
-    -- State tracking
-    message_count INTEGER DEFAULT 0,
-    is_active BOOLEAN DEFAULT true
-);
-
--- Messages table
-CREATE TABLE messages (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
-    -- Message content
-    role VARCHAR(20) NOT NULL CHECK (role IN ('user', 'assistant')),
-    content TEXT NOT NULL,
-    
-    -- Response metadata (for assistant messages)
-    parts TEXT[] DEFAULT '{}',
-    delays_ms INTEGER[] DEFAULT '{}',
-    has_question BOOLEAN DEFAULT false,
-    
-    -- Processing metadata
-    prompt_strategy VARCHAR(50),
-    processing_time_ms INTEGER,
-    
-    -- Vector embeddings (для semantic search) - ТЕПЕРЬ С РАСШИРЕНИЕМ
-    embedding vector(1536) -- OpenAI embeddings dimension
-);
-
--- Memory summaries table
-CREATE TABLE memory_summaries (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
-    -- Summary content
-    summary_type VARCHAR(50) NOT NULL, -- 'daily', 'weekly', 'topic'
-    content TEXT NOT NULL,
-    
-    -- Reference data
-    messages_count INTEGER DEFAULT 0,
-    date_range DATERANGE,
-    topics TEXT[],
-    
-    -- Vector embedding for semantic search - ИСПРАВЛЕНО
-    embedding vector(1536)
-);
-
--- User insights table (for behavioral adaptation)
-CREATE TABLE user_insights (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
-    -- Insight data
-    insight_type VARCHAR(50) NOT NULL, -- 'communication_pattern', 'interest', 'emotional_state'
-    insight_data JSONB NOT NULL,
-    confidence_score FLOAT DEFAULT 0.0,
-    
-    -- Temporal data
-    observed_date DATE DEFAULT CURRENT_DATE,
-    is_active BOOLEAN DEFAULT true
-);
-
--- Vector Memory table for semantic search
-CREATE TABLE IF NOT EXISTS vector_memories (
+-- Таблиця для довго-строкової пам'яті
+CREATE TABLE IF NOT EXISTS long_term_memory (
     id SERIAL PRIMARY KEY,
     user_id VARCHAR(255) NOT NULL,
     content TEXT NOT NULL,
-    role VARCHAR(50) NOT NULL,
-    timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
-    day_number INTEGER NOT NULL,
-    importance_score FLOAT NOT NULL,
-    topics JSONB,
-    emotions JSONB,
-    metadata JSONB,
-    embedding VECTOR(1536), -- OpenAI text-embedding-ada-002 dimension
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    memory_type VARCHAR(100) NOT NULL,
+    importance_score FLOAT DEFAULT 0.0,
+    access_count INTEGER DEFAULT 0,
+    last_accessed TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    metadata JSONB DEFAULT '{}',
+    embedding vector(1536),
+    INDEX(user_id, memory_type),
+    INDEX(user_id, importance_score DESC),
+    INDEX(user_id, last_accessed DESC)
 );
 
--- Indexes for performance
-CREATE INDEX idx_users_user_id ON users(user_id);
-CREATE INDEX idx_users_last_activity ON users(last_activity);
+-- Таблиця для семантичного контексту
+CREATE TABLE IF NOT EXISTS semantic_context (
+    id SERIAL PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    context_text TEXT NOT NULL,
+    context_type VARCHAR(100) NOT NULL,
+    relevance_score FLOAT DEFAULT 0.0,
+    timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    metadata JSONB DEFAULT '{}',
+    embedding vector(1536),
+    INDEX(user_id, context_type),
+    INDEX(user_id, relevance_score DESC)
+);
 
-CREATE INDEX idx_conversations_user_id ON conversations(user_id);
-CREATE INDEX idx_conversations_day_number ON conversations(day_number);
-CREATE INDEX idx_conversations_created_at ON conversations(created_at);
+-- Таблиця для поведінкового аналізу
+CREATE TABLE IF NOT EXISTS behavioral_analysis (
+    id SERIAL PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    behavior_data JSONB NOT NULL,
+    analysis_type VARCHAR(100) NOT NULL,
+    confidence_score FLOAT DEFAULT 0.0,
+    timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    INDEX(user_id, analysis_type),
+    INDEX(user_id, timestamp DESC)
+);
 
-CREATE INDEX idx_messages_conversation_id ON messages(conversation_id);
-CREATE INDEX idx_messages_user_id ON messages(user_id);
-CREATE INDEX idx_messages_created_at ON messages(created_at);
-CREATE INDEX idx_messages_role ON messages(role);
+-- Таблиця для стадій розмов
+CREATE TABLE IF NOT EXISTS conversation_stages (
+    id SERIAL PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    stage_number INTEGER NOT NULL,
+    stage_name VARCHAR(100) NOT NULL,
+    stage_data JSONB DEFAULT '{}',
+    started_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    completed_at TIMESTAMP WITH TIME ZONE NULL,
+    is_active BOOLEAN DEFAULT TRUE,
+    INDEX(user_id, stage_number),
+    INDEX(user_id, is_active)
+);
 
--- VECTOR INDEXES для быстрого семантического поиска
-CREATE INDEX idx_messages_embedding ON messages USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
-CREATE INDEX idx_memory_summaries_embedding ON memory_summaries USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+-- Таблиця для налаштувань користувачів
+CREATE TABLE IF NOT EXISTS user_settings (
+    id SERIAL PRIMARY KEY,
+    user_id VARCHAR(255) UNIQUE NOT NULL,
+    settings JSONB DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 
-CREATE INDEX idx_memory_summaries_user_id ON memory_summaries(user_id);
-CREATE INDEX idx_memory_summaries_type ON memory_summaries(summary_type);
-CREATE INDEX idx_memory_summaries_date_range ON memory_summaries USING GIST(date_range);
+-- Створюємо індекси для векторного пошуку
+CREATE INDEX IF NOT EXISTS long_term_memory_embedding_idx ON long_term_memory USING ivfflat (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS semantic_context_embedding_idx ON semantic_context USING ivfflat (embedding vector_cosine_ops);
 
-CREATE INDEX idx_user_insights_user_id ON user_insights(user_id);
-CREATE INDEX idx_user_insights_type ON user_insights(insight_type);
-CREATE INDEX idx_user_insights_date ON user_insights(observed_date);
-
--- Indexes for fast retrieval
-CREATE INDEX IF NOT EXISTS idx_vector_memories_user_id ON vector_memories(user_id);
-CREATE INDEX IF NOT EXISTS idx_vector_memories_timestamp ON vector_memories(timestamp);
-CREATE INDEX IF NOT EXISTS idx_vector_memories_importance ON vector_memories(importance_score);
-
--- Vector index for semantic search using cosine similarity
-CREATE INDEX IF NOT EXISTS idx_vector_memories_embedding 
-ON vector_memories 
-USING ivfflat (embedding vector_cosine_ops) 
-WITH (lists = 100);
-
--- Functions for automatic updates
+-- Додаємо тригер для автоматичного оновлення updated_at
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
-    NEW.updated_at = CURRENT_TIMESTAMP;
+    NEW.updated_at = NOW();
     RETURN NEW;
 END;
 $$ language 'plpgsql';
 
--- Triggers for updated_at
-CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_user_settings_updated_at BEFORE UPDATE ON user_settings FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_conversations_updated_at BEFORE UPDATE ON conversations
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- Створюємо таблицю для системних налаштувань
+CREATE TABLE IF NOT EXISTS system_config (
+    id SERIAL PRIMARY KEY,
+    config_key VARCHAR(255) UNIQUE NOT NULL,
+    config_value JSONB NOT NULL,
+    description TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 
-CREATE TRIGGER update_memory_summaries_updated_at BEFORE UPDATE ON memory_summaries
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- Вставляємо початкові налаштування
+INSERT INTO system_config (config_key, config_value, description) VALUES
+('system_version', '"1.0.0"', 'Версія системи Agatha AI'),
+('memory_retention_days', '30', 'Кількість днів для зберігання короткострокової пам''яті'),
+('max_long_term_memories', '1000', 'Максимальна кількість записів у довгостроковій пам''яті на користувача'),
+('embedding_model', '"text-embedding-ada-002"', 'Модель для створення embeddings')
+ON CONFLICT (config_key) DO NOTHING;
 
--- Sample data (optional for development)
-INSERT INTO users (user_id, name) VALUES 
-('demo_user', 'Demo User'),
-('test_user', 'Test User'); 
+-- Готово! База даних ініціалізована

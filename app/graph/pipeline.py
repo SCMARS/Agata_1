@@ -49,6 +49,11 @@ class PipelineState(TypedDict):
     # Поля для контроля вопросов
     may_ask_question: Optional[bool]
     has_question_after_filter: Optional[bool]
+    
+
+    stage_progress: Optional[Dict[str, Any]]
+    next_theme_slot: Optional[Dict[str, Any]]
+    response_structure_instructions: Optional[str]
 
 class AgathaPipeline:
     def __init__(self):
@@ -217,12 +222,52 @@ class AgathaPipeline:
         if not state["messages"]:
             state["normalized_input"] = ""
             return state
+        from ..utils.short_message_processor import short_message_processor
+        from ..utils.stage_controller import stage_controller
         
-        # Get last user message
+        # Обрабатываем короткие сообщения пользователя
         user_messages = [msg for msg in state["messages"] if msg.get('role') == 'user']
         if user_messages:
-            last_message = user_messages[-1]
-            state["normalized_input"] = last_message.get('content', '').strip()
+            # Обрабатываем все сообщения пользователя для объединения коротких
+            processed = short_message_processor.process_user_messages(
+                state["user_id"], 
+                user_messages
+            )
+            
+            if processed["is_short_sequence"] and processed["combined_text"]:
+                # Если это короткая последовательность, используем объединенный текст
+                state["normalized_input"] = processed["combined_text"]
+                log_info(f"🔄 Объединили {processed['message_count']} коротких сообщений: {processed['combined_text'][:100]}...")
+            else:
+                # Иначе используем последнее сообщение
+                last_message = user_messages[-1]
+                state["normalized_input"] = last_message.get('content', '').strip()
+                log_info(f"📝 Используем последнее сообщение: {state['normalized_input'][:100]}...")
+        else:
+            state["normalized_input"] = ""
+        
+        # Определяем стейдж общения
+        message_count = len(user_messages)
+        current_stage = stage_controller.get_user_stage(state["user_id"], message_count)
+        state["stage_number"] = current_stage
+        
+        # Логируем активность стейджа
+        stage_controller.log_stage_activity(
+            state["user_id"], 
+            current_stage, 
+            "обработка сообщения",
+            f"сообщений: {message_count}, текст: {state['normalized_input'][:50]}..."
+        )
+        
+        # Получаем детальные инструкции для стейджа
+        stage_progress = stage_controller.get_stage_progress(state["user_id"], current_stage)
+        next_theme_slot = stage_controller.get_next_theme_and_slot(state["user_id"], current_stage)
+        response_structure = stage_controller.get_response_structure_instructions(current_stage)
+        
+        # Сохраняем информацию о стейдже в состоянии
+        state["stage_progress"] = stage_progress
+        state["next_theme_slot"] = next_theme_slot
+        state["response_structure_instructions"] = response_structure
         
         # Set day number and stage
         # Вычисляем номер дня на основе первого сообщения пользователя
@@ -234,17 +279,8 @@ class AgathaPipeline:
         else:
             state["day_number"] = 1
 
-        # Determine stage based on message count
-        message_count = len(state.get("messages", []))
-        # Правильная логика этапов согласно ТЗ:
-        # Этап 1: 1-5 сообщений, Этап 2: 5-15 сообщений, Этап 3: 15+ сообщений
-        if message_count <= 5:
-            stage_number = 1
-        elif message_count <= 15:
-            stage_number = 2
-        else:
-            stage_number = 3
-        state["stage_number"] = stage_number
+        # Используем стейдж из StageController (уже определен выше)
+        stage_number = state.get("stage_number", 1)
         stage_prompt = self.prompt_loader.get_stage_prompt(stage_number)
         state["stage_prompt"] = stage_prompt
         log_info(f"Set stage {stage_number} prompt: {len(stage_prompt)} chars")
@@ -255,11 +291,9 @@ class AgathaPipeline:
         log_info("🧠 NODE: _short_memory ✅ STARTED")
         user_id = state["user_id"]
 
-        # Убедимся, что этап сохранен
+
         if "stage_number" not in state:
             message_count = len(state.get("messages", []))
-            # Правильная логика этапов согласно ТЗ:
-            # Этап 1: 1-5 сообщений, Этап 2: 5-15 сообщений, Этап 3: 15+ сообщений
             if message_count <= 5:
                 stage_number = 1
             elif message_count <= 15:

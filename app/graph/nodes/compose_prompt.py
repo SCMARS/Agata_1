@@ -317,13 +317,7 @@ class ComposePromptNode:
     def _create_prompt_template(self) -> ChatPromptTemplate:
         """Создает шаблон промпта с полным набором переменных"""
         
-        # Добавляем все переменные, которые используются в системном промпте
-        template_vars = [
-            "input_text", "short_memory_summary", "long_memory_facts", "semantic_context",
-            "day_instructions", "behavior_style", "agatha_bio", "tone_style", "now_iso",
-            "day_number", "last_diff_sec", "may_ask_question", "time_greeting", "absence_comment"
-        ]
-        
+        # Простой шаблон без переменных в системном промпте
         return ChatPromptTemplate.from_messages([
             ("system", self.system_prompt),
             ("user", "{input_text}")
@@ -506,16 +500,63 @@ class ComposePromptNode:
                 behavioral_instructions = behavioral_analysis.get("behavioral_instructions", "")
                 enhanced_memory_context_with_behavior = f"{enhanced_memory_context}\n\n{behavioral_instructions}"
                 
-                # Создаем системный промпт с памятью и поведенческой адаптацией
+
                 dynamic_system_prompt = self._load_system_prompt(enhanced_memory_context_with_behavior, stage_number, day_number)
+                
+                self.system_prompt = dynamic_system_prompt
+                
+                # Определяем переменные для замены
+                final_short_summary = memory_data.get("short_memory_summary", "—")
+                final_long_facts = memory_data.get("long_memory_facts", "—")
+                final_semantic_context = memory_data.get("semantic_context", "—")
+                agatha_bio = self._get_agatha_bio(day_number)
+                
+                # Определяем last_diff_sec из контекста
+                last_diff_sec = last_diff_sec_real if 'last_diff_sec_real' in locals() else 0
+                
+                # Определяем остальные переменные
+                time_greeting = time_greeting if 'time_greeting' in locals() else ""
+                absence_comment = absence_comment if 'absence_comment' in locals() else ""
+                may_ask_question = may_ask_question if 'may_ask_question' in locals() else False
+                
+                # Получаем инструкции по структуре ответов из стейджа
+                response_structure_instructions = state.get("response_structure_instructions", "")
+                stage_progress = state.get("stage_progress", {})
+                next_theme_slot = state.get("next_theme_slot", {})
+                
+                # Безопасная проверка типов
+                if not isinstance(stage_progress, dict):
+                    stage_progress = {}
+                if not isinstance(next_theme_slot, dict):
+                    next_theme_slot = {}
+                
+                # Сначала заменяем переменные в системном промпте
+                system_prompt_with_vars = dynamic_system_prompt
+                for var, value in {
+                    "short_memory_summary": final_short_summary,
+                    "long_memory_facts": final_long_facts,
+                    "semantic_context": final_semantic_context,
+                    "day_instructions": "",
+                    "behavior_style": behavioral_instructions,
+                    "agatha_bio": agatha_bio,
+                    "tone_style": "",
+                    "now_iso": now_iso,
+                    "day_number": day_number,
+                    "last_diff_sec": last_diff_sec,
+                    "may_ask_question": may_ask_question,
+                    "time_greeting": time_greeting,
+                    "absence_comment": absence_comment,
+                    "response_structure_instructions": response_structure_instructions,
+                    "stage_progress": stage_progress.get("stage_name", "Stage 1") if stage_progress else "Stage 1",
+                    "next_theme_slot": next_theme_slot.get("theme_name", "Знакомство") if next_theme_slot else "Знакомство"
+                }.items():
+                    system_prompt_with_vars = system_prompt_with_vars.replace(f"{{{var}}}", str(value))
                 
                 # Создаем шаблон с актуальным системным промптом
                 dynamic_template = ChatPromptTemplate.from_messages([
-                    ("system", dynamic_system_prompt),
+                    ("system", system_prompt_with_vars),
                     ("user", "{input_text}")
                 ])
-                
-                # Переформатируем с новым шаблоном
                 formatted_prompt = dynamic_template.format_messages(input_text=input_text)
                 logger.info(f"✅ Использован динамический системный промпт с памятью, временем и behavioral adaptation")
                 logger.info(f"🎭 BEHAVIORAL: Стратегия={behavioral_analysis.get('strategy_name', 'Unknown')}, Этап={behavioral_analysis.get('current_stage', 'Unknown')}")
