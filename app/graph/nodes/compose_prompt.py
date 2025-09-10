@@ -541,11 +541,11 @@ class ComposePromptNode:
                 # Визначаємо time_period незалежно від stage_controller
                 current_hour = datetime.now().hour
                 if 6 <= current_hour < 12:
-                    time_period = "morning"
+                    time_period = "утро"
                 elif 12 <= current_hour < 18:
-                    time_period = "day"
+                    time_period = "день"
                 else:
-                    time_period = "evening"
+                    time_period = "вечер"
 
                 if stage_controller:
                     full_stage_text = stage_progress.get("full_stage_text", "")
@@ -560,8 +560,8 @@ class ComposePromptNode:
                     daily_schedule = stage_controller.get_daily_schedule_example(current_stage_number)
                 
                 logger.info(f"📚 [STAGE_FULL] Завантажено повний текст стейджу: {len(full_stage_text)} символів")
-                logger.info(f"⏰ [TIME_QUESTIONS] Питання для {time_period}: {len(time_questions)} символів")
-                logger.info(f"📅 [DAILY_SCHEDULE] Розпорядок дня: {len(daily_schedule)} символів")
+                logger.info(f"⏰ [TIME_QUESTIONS] Питання для {time_period}: '{time_questions}' ({len(time_questions)} символів)")
+                logger.info(f"📅 [DAILY_SCHEDULE] Розпорядок дня: '{daily_schedule}' ({len(daily_schedule)} символів)")
                 
                 # 🔥 ЗБЕРІГАЄМО ВСІ ДАНІ В STATE ДЛЯ ПОВЕРНЕННЯ ЧЕРЕЗ API
                 state["full_stage_text"] = full_stage_text

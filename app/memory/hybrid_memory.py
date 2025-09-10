@@ -42,7 +42,7 @@ class HybridMemory(MemoryAdapter):
         
         # Счетчики для аналитики
         self.total_messages = 0
-        self.conversation_start = datetime.utcnow()
+        self.conversation_start = datetime.now()
         
     def add_message(self, message: Message, context: MemoryContext) -> None:
         """Добавить сообщение в обе системы памяти"""
@@ -68,7 +68,7 @@ class HybridMemory(MemoryAdapter):
             long_context = self.long_memory.get_context(context, query)
         
         # Создаем статистику общения
-        days_communicating = (datetime.utcnow() - self.conversation_start).days + 1
+        days_communicating = (datetime.now() - self.conversation_start).days + 1
         communication_stats = f"День общения: {context.day_number} | Всего сообщений: {self.total_messages}"
         
         # Объединяем контексты
@@ -335,11 +335,11 @@ class HybridMemory(MemoryAdapter):
         self.short_memory.clear_memory()
         self.long_memory.clear_memory()
         self.total_messages = 0
-        self.conversation_start = datetime.utcnow()
+        self.conversation_start = datetime.now()
     
     def get_user_stats(self) -> Dict[str, Any]:
         """Получить статистику пользователя (совместимость с MemoryLevelsManager)"""
-        days_since_start = (datetime.utcnow() - self.conversation_start).days + 1
+        days_since_start = (datetime.now() - self.conversation_start).days + 1
         return {
             'days_since_start': days_since_start,
             'total_messages': self.total_messages,

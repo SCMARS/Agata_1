@@ -17,7 +17,7 @@ class UnifiedMemoryManager:
     - Поиск: сначала window, потом vector_db
     """
     
-    def __init__(self, user_id: str, window_size: int = 10):
+    def __init__(self, user_id: str, window_size: int = 8):  # Уменьшили с 10 до 8
         self.user_id = user_id
         self.window_size = window_size
         self.short_term_window = []  # Последние N сообщений
@@ -53,17 +53,36 @@ class UnifiedMemoryManager:
             'role': role,
             'content': content,
             'metadata': metadata or {},
-            'timestamp': (timestamp or datetime.utcnow()).isoformat(),
+            'timestamp': (timestamp or datetime.now()).isoformat(),
             'message_id': self.message_count
         }
         
         logger.info(f"📝 [UNIFIED-{self.user_id}] Добавляем сообщение #{self.message_count}: {content[:50]}...")
         
         results = {'short_term': False, 'long_term': False}
-        
-        # Добавляем в окно краткосрочной памяти
+
+
         self.short_term_window.append(message)
         results['short_term'] = True
+        
+
+        if self.vector_available and self._is_important_message(content, role):
+            try:
+                # Сохраняем важное сообщение в векторную БД сразу
+                self.vector_db.add_document(
+                    content=content,
+                    metadata={
+                        **metadata,
+                        'role': role,
+                        'timestamp': (timestamp or datetime.now()).isoformat(),
+                        'importance': 'high',
+                        'immediate_save': True
+                    }
+                )
+                results['long_term'] = True
+                logger.info(f"⭐ [UNIFIED-{self.user_id}] ВАЖНОЕ сообщение сохранено в векторную БД: {content[:50]}...")
+            except Exception as e:
+                logger.error(f"❌ [UNIFIED-{self.user_id}] Ошибка сохранения важного сообщения: {e}")
         
         # Если окно переполнено - переносим старое сообщение в векторную БД
         if len(self.short_term_window) > self.window_size:
@@ -71,18 +90,19 @@ class UnifiedMemoryManager:
             
             if self.vector_available:
                 try:
-                    # Переносим в векторную БД
-                    self.vector_db.add_document(
-                        content=oldest_message['content'],
-                        metadata={
-                            **oldest_message['metadata'],
-                            'role': oldest_message['role'],
-                            'timestamp': oldest_message['timestamp'],
-                            'transferred_from_short_term': True
-                        }
-                    )
-                    results['long_term'] = True
-                    logger.info(f"🗄️ [UNIFIED-{self.user_id}] Перенесли сообщение #{oldest_message['message_id']} в векторную БД")
+                    # Переносим в векторную БД только если не было сохранено ранее
+                    if not results.get('long_term', False):
+                        self.vector_db.add_document(
+                            content=oldest_message['content'],
+                            metadata={
+                                **oldest_message['metadata'],
+                                'role': oldest_message['role'],
+                                'timestamp': oldest_message['timestamp'],
+                                'transferred_from_short_term': True
+                            }
+                        )
+                        results['long_term'] = True
+                        logger.info(f"🗄️ [UNIFIED-{self.user_id}] Перенесли сообщение #{oldest_message['message_id']} в векторную БД")
                 except Exception as e:
                     logger.error(f"❌ [UNIFIED-{self.user_id}] Ошибка переноса в векторную БД: {e}")
             else:
@@ -91,16 +111,42 @@ class UnifiedMemoryManager:
         logger.info(f"✅ [UNIFIED-{self.user_id}] Сообщение добавлено. Окно: {len(self.short_term_window)}, Всего: {self.message_count}")
         return results
     
-    def get_context_for_prompt(self, query: str = "") -> Dict[str, str]:
-        """
-        Получает контекст для промпта с умным выбором источника
+    def _is_important_message(self, content: str, role: str) -> bool:
+        """Определяет важность сообщения для немедленного сохранения в долгосрочную память"""
+        if not content or len(content.strip()) < 10:
+            return False
         
-        Args:
-            query: текущий запрос пользователя
+        # Простые критерии без хардкода:
+        # 1. Длинные сообщения (>80 символов) потенциально важны
+        if len(content) > 80:
+            return True
             
-        Returns:
-            Словарь с контекстом для промпта
-        """
+        # 2. Сообщения с личными местоимениями часто содержат важную информацию
+        personal_indicators = content.lower().count('я ') + content.lower().count('мне ') + content.lower().count('мой')
+        if personal_indicators >= 2:
+            return True
+            
+        # 3. Сообщения с вопросами от пользователя
+        if role == 'user' and ('?' in content):
+            return True
+            
+        # 4. Сообщения с цифрами (возраст, даты, номера) 
+        import re
+        if re.search(r'\d+', content):
+            return True
+            
+        # 5. Первые сообщения пользователя всегда важны (знакомство)
+        if role == 'user' and self.message_count <= 5:
+            return True
+            
+        # 6. Эмоционально окрашенные сообщения (много восклицательных знаков или длинные)
+        if content.count('!') >= 2 or len(content) > 60:
+            return True
+            
+        return False
+    
+    def get_context_for_prompt(self, query: str = "") -> Dict[str, str]:
+
         logger.info(f"🔍 [UNIFIED-{self.user_id}] Получаем контекст. Сообщений: {self.message_count}, В окне: {len(self.short_term_window)}")
         
         context = {
@@ -204,7 +250,7 @@ class UnifiedMemoryManager:
         elif len(user_messages) == 1:
             # Только одно сообщение - это первый раз, используем очень старую дату
             logger.info(f"🆕 [UNIFIED-{self.user_id}] Первое сообщение пользователя")
-            return datetime.utcnow() - timedelta(days=1)  # Имитируем что прошел день
+            return datetime.now() - timedelta(days=1)  # Имитируем что прошел день
         
         # Если не найдено в краткосрочной памяти, ищем в векторной БД
         if self.vector_available:
@@ -236,7 +282,7 @@ class UnifiedMemoryManager:
                 logger.warning(f"⚠️ [UNIFIED-{self.user_id}] Ошибка получения времени из векторной БД: {e}")
         
         # Fallback - возвращаем время создания менеджера (приблизительно)
-        return datetime.utcnow()
+        return datetime.now()
     
     def get_memory_stats(self) -> Dict[str, Any]:
         """Получает статистику памяти для отладки"""

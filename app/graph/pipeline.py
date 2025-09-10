@@ -1,6 +1,6 @@
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional, TypedDict
 from langgraph.graph import StateGraph
 from langchain_openai import ChatOpenAI
@@ -18,6 +18,7 @@ from ..utils.question_controller import question_controller
 from ..utils.question_filter import question_filter
 from ..memory.memory_adapter import MemoryAdapter
 from ..graph.nodes.compose_prompt import ComposePromptNode
+from ..utils.stage_controller import StageController
 
 QUIET_MODE = os.getenv('AGATHA_QUIET', 'false').lower() == 'true'
 
@@ -141,17 +142,14 @@ class AgathaPipeline:
     def _ensure_stage_data(self, state: PipelineState) -> None:
         """Убедиться, что stage данные сохранены в state"""
         if "stage_number" not in state:
-            message_count = len(state.get("messages", []))
-            # Правильная логика этапов согласно ТЗ:
-            # Этап 1: 1-5 сообщений, Этап 2: 5-15 сообщений, Этап 3: 15+ сообщений
-            if message_count <= 5:
-                stage_number = 1
-            elif message_count <= 15:
-                stage_number = 2
-            else:
-                stage_number = 3
+            # ПОЛУЧАЕМ stage_number ИЗ stage_controller, а НЕ пересчитываем
+            stage_controller = StageController()
+            total_message_count = len(state.get("messages", []))
+            stage_number = stage_controller.get_user_stage(state.get("user_id", "unknown"), total_message_count)
             state["stage_number"] = stage_number
             state["stage_prompt"] = self.prompt_loader.get_stage_prompt(stage_number)
+            
+            log_info(f"🔧 [FALLBACK] Установлен stage_number: {stage_number} для {total_message_count} сообщений")
             log_info(f"Ensured stage {stage_number} data in state")
 
     async def process_chat(self, user_id: str, messages: List[Dict], meta_time: Optional[str] = None) -> Dict[str, Any]:
@@ -173,9 +171,9 @@ class AgathaPipeline:
             "behavioral_analysis": {},
             "strategy_confidence": 0.0,
             "day_number": 1,
-            "stage_number": 1,
+            
             "question_count": 0,
-            "processing_start": datetime.utcnow()
+            "processing_start": datetime.now()
         }
         
         if meta_time:
@@ -183,17 +181,17 @@ class AgathaPipeline:
                 # Обрабатываем случай когда meta_time - словарь или строка
                 if isinstance(meta_time, dict):
                     # Если словарь, используем текущее время
-                    state["meta_time"] = datetime.utcnow()
+                    state["meta_time"] = datetime.now()
                 elif isinstance(meta_time, str):
                     # Если строка, парсим ISO формат
                     state["meta_time"] = datetime.fromisoformat(meta_time.replace('Z', '+00:00'))
                 else:
-                    state["meta_time"] = datetime.utcnow()
+                    state["meta_time"] = datetime.now()
             except Exception as e:
                 log_info(f"Warning: Failed to parse meta_time {meta_time}: {e}")
-                state["meta_time"] = datetime.utcnow()
+                state["meta_time"] = datetime.now()
         else:
-            state["meta_time"] = datetime.utcnow()
+            state["meta_time"] = datetime.now()
         
         log_info(f"📝 Initial state: {state}")
 
@@ -209,15 +207,15 @@ class AgathaPipeline:
                 "delays_ms": result["processed_response"].get("delays_ms", []),
                 "behavioral_analysis": result.get("behavioral_analysis", {}),
                 "current_strategy": result.get("current_strategy", "unknown"),
-                "stage_number": result.get("stage_number", 1),
+                "stage_number": state.get("stage_number", 1),
                 "day_number": result.get("day_number", 1),
                 # 🔥 ДОДАЄМО ВСІ ДАНІ СТЕЙДЖУ ДЛЯ TELEGRAM БОТА
                 "stage_progress": result.get("stage_progress", {}),
                 "next_theme_slot": result.get("next_theme_slot", {}),
                 "response_structure_instructions": result.get("response_structure_instructions", ""),
                 "full_stage_text": result.get("full_stage_text", "") or result.get("stage_progress", {}).get("full_stage_text", ""),
-                "time_questions": result.get("time_questions", ""),
-                "daily_schedule": result.get("daily_schedule", ""),
+                "time_questions": state.get("time_questions", ""),
+                "daily_schedule": state.get("daily_schedule", ""),
                 "time_period": result.get("time_period", "evening"),
                 "memory_stats": {
                     "short_memory": len(str(result.get("memory_context", ""))),
@@ -258,17 +256,28 @@ class AgathaPipeline:
         else:
             state["normalized_input"] = ""
         
-        # Определяем стейдж общения
-        message_count = len(user_messages)
-        current_stage = stage_controller.get_user_stage(state["user_id"], message_count)
+        # Определяем стейдж общения (считаем ВСЕ сообщения в диалоге)
+        total_message_count = len(state.get("messages", []))
+        user_message_count = len(user_messages)
+        current_time = datetime.now().strftime("%H:%M:%S")
+        
+        log_info(f"🔄 [{current_time}] [PIPELINE] === ОПРЕДЕЛЕНИЕ СТЕЙДЖА ===")
+        log_info(f"   👤 Пользователь: {state['user_id']}")
+        log_info(f"   📧 Сообщений всего: {total_message_count}")
+        log_info(f"   👥 Сообщений пользователя: {user_message_count}")
+        log_info(f"   💬 Текущий ввод: {state['normalized_input'][:50]}...")
+        
+        current_stage = stage_controller.get_user_stage(state["user_id"], total_message_count)
+        log_info(f"🔍 [DEBUG] get_user_stage вернул: {current_stage} (тип: {type(current_stage)})")
         state["stage_number"] = current_stage
+        log_info(f"🔍 [DEBUG] Установлен stage_number в state: {state['stage_number']}")
         
         # Логируем активность стейджа
         stage_controller.log_stage_activity(
             state["user_id"], 
             current_stage, 
             "обработка сообщения",
-            f"сообщений: {message_count}, текст: {state['normalized_input'][:50]}..."
+            f"сообщений: {total_message_count}, текст: {state['normalized_input'][:50]}..."
         )
         
         # Получаем детальные инструкции для стейджа
@@ -285,14 +294,27 @@ class AgathaPipeline:
         # Вычисляем номер дня на основе первого сообщения пользователя
         user_id = state["user_id"]
         memory = self._get_memory(user_id)
+        
+        log_info(f"📅 [{current_time}] [PIPELINE] === ОПРЕДЕЛЕНИЕ ДНЯ ОБЩЕНИЯ ===")
         if hasattr(memory, 'get_user_stats'):
             stats = memory.get_user_stats()
             state["day_number"] = stats.get('days_since_start', 1)
+            log_info(f"   📊 Статистика памяти: {stats}")
+            log_info(f"   🗓️  День общения: {state['day_number']}")
         else:
             state["day_number"] = 1
+            log_info(f"   ⚠️  Память не поддерживает статистику, используем день 1")
 
         # Используем стейдж из StageController (уже определен выше)
-        stage_number = state.get("stage_number", 1)
+        stage_number = state.get("stage_number")
+        log_info(f"🔍 [DEBUG] Читаем stage_number из state: {stage_number} (тип: {type(stage_number)})")
+        if not stage_number:
+            # Если stage_number не установлен, что-то пошло не так
+            log_info(f"⚠️ [PIPELINE] stage_number не установлен! Используем fallback логику.")
+            stage_controller = StageController()
+            total_message_count = len(state.get("messages", []))
+            stage_number = stage_controller.get_user_stage(state.get("user_id", "unknown"), total_message_count)
+            state["stage_number"] = stage_number
         stage_prompt = self.prompt_loader.get_stage_prompt(stage_number)
         state["stage_prompt"] = stage_prompt
         log_info(f"Set stage {stage_number} prompt: {len(stage_prompt)} chars")
@@ -304,16 +326,25 @@ class AgathaPipeline:
         user_id = state["user_id"]
 
 
-        if "stage_number" not in state:
-            message_count = len(state.get("messages", []))
-            if message_count <= 5:
-                stage_number = 1
-            elif message_count <= 15:
-                stage_number = 2
-            else:
-                stage_number = 3
+        # stage_number уже установлен в _ingest_input, ВСЕГДА используем его
+        stage_number = state.get("stage_number")
+        log_info(f"📋 [SHORT_MEMORY] Получен stage_number из state: {stage_number} (тип: {type(stage_number)})")
+        log_info(f"📋 [SHORT_MEMORY] Все ключи в state: {list(state.keys())}")
+        
+        if stage_number is None:
+            log_info(f"❌ [CRITICAL] stage_number is None в _short_memory! Это ОШИБКА!")
+            # В качестве fallback используем значение из StageController
+            stage_controller = StageController()
+            total_message_count = len(state.get("messages", []))
+            stage_number = stage_controller.get_user_stage(state.get("user_id", "unknown"), total_message_count)
             state["stage_number"] = stage_number
-            state["stage_prompt"] = self.prompt_loader.get_stage_prompt(stage_number)
+            log_info(f"📋 [FALLBACK] Установлен fallback stage_number: {stage_number}")
+        
+        log_info(f"📋 [SHORT_MEMORY] Финальный stage_number: {stage_number}")
+        state["stage_prompt"] = self.prompt_loader.get_stage_prompt(stage_number)
+        
+        log_info(f"📝 [PIPELINE] Используем stage_number: {stage_number}")
+        log_info(f"📝 [PIPELINE] Загружен stage_prompt для стейджа {stage_number}")
 
         memory = self._get_memory(user_id)
         
@@ -329,7 +360,7 @@ class AgathaPipeline:
                     role="user",
                     content=state["normalized_input"],
                     metadata={
-                        'timestamp': (state["meta_time"] or datetime.utcnow()).isoformat(),
+                        'timestamp': (state["meta_time"] or datetime.now()).isoformat(),
                         'day_number': state["day_number"],
                         'user_id': user_id
                     },
@@ -349,7 +380,7 @@ class AgathaPipeline:
                 message = Message(
                     role="user",
                     content=state["normalized_input"],
-                    timestamp=state["meta_time"] or datetime.utcnow()
+                    timestamp=state["meta_time"] or datetime.now()
                 )
                 context = MemoryContext(
                     user_id=user_id,
@@ -404,19 +435,22 @@ class AgathaPipeline:
         """Node 3: Apply daily scenario policy - АСИНХРОННЫЙ"""
         day_number = state["day_number"]
         
-        # Убедимся, что этап сохранен
-        if "stage_number" not in state:
-            message_count = len(state.get("messages", []))
-            # Правильная логика этапов согласно ТЗ:
-            # Этап 1: 1-5 сообщений, Этап 2: 5-15 сообщений, Этап 3: 15+ сообщений
-            if message_count <= 5:
-                stage_number = 1
-            elif message_count <= 15:
-                stage_number = 2
-            else:
-                stage_number = 3
+        # stage_number уже установлен в _ingest_input, ВСЕГДА используем его
+        stage_number = state.get("stage_number")
+        log_info(f"📋 [DAY_POLICY] Получен stage_number из state: {stage_number} (тип: {type(stage_number)})")
+        
+        if stage_number is None:
+            log_info(f"❌ [CRITICAL] stage_number is None в _day_policy! Это ОШИБКА!")
+            # В качестве fallback используем значение из StageController
+            stage_controller = StageController()
+            total_message_count = len(state.get("messages", []))
+            stage_number = stage_controller.get_user_stage(state.get("user_id", "unknown"), total_message_count)
             state["stage_number"] = stage_number
-            state["stage_prompt"] = self.prompt_loader.get_stage_prompt(stage_number)
+            log_info(f"📋 [FALLBACK] Установлен fallback stage_number: {stage_number}")
+        
+        log_info(f"📋 [DAY_POLICY] Финальный stage_number: {stage_number}")
+        
+        log_info(f"📋 [PIPELINE] Используем stage_number: {stage_number} для behavioral adaptation")
 
         # Добавляем контекст времени и истории
         user_id = state["user_id"]
@@ -428,12 +462,12 @@ class AgathaPipeline:
             insights = memory.get_conversation_insights()
 
             # Обогащаем промпт контекстом
-            meta_time = state["meta_time"] or datetime.utcnow()
+            meta_time = state["meta_time"] or datetime.now()
             if isinstance(meta_time, str):
                 try:
                     meta_time = datetime.fromisoformat(meta_time.replace('Z', '+00:00'))
                 except:
-                    meta_time = datetime.utcnow()
+                    meta_time = datetime.now()
             time_context = self.time_utils.get_time_context(meta_time)
 
             enhanced_prompt = f"""
@@ -606,12 +640,12 @@ class AgathaPipeline:
         behavioral_analysis = state.get("behavioral_analysis", {})
         
         # Подготавливаем контекстные данные
-        meta_time = state["meta_time"] or datetime.utcnow()
+        meta_time = state["meta_time"] or datetime.now()
         if isinstance(meta_time, str):
             try:
                 meta_time = datetime.fromisoformat(meta_time.replace('Z', '+00:00'))
             except:
-                meta_time = datetime.utcnow()
+                meta_time = datetime.now()
         time_context = self.time_utils.get_time_context(meta_time)
 
         context_data = {
@@ -892,11 +926,11 @@ class AgathaPipeline:
                 role="assistant",
                 content=" ".join(state["processed_response"]["parts"]),
                 metadata={
-                    'timestamp': datetime.utcnow().isoformat(),
+                    'timestamp': datetime.now().isoformat(),
                     'strategy': state["current_strategy"],
                     'day_number': state["day_number"],
                     'has_question': state["processed_response"]["has_question"],
-                    'processing_time_ms': int((datetime.utcnow() - state["processing_start"]).total_seconds() * 1000)
+                    'processing_time_ms': int((datetime.now() - state["processing_start"]).total_seconds() * 1000)
                 },
                 user_id=user_id
             )
@@ -907,12 +941,12 @@ class AgathaPipeline:
             assistant_message = Message(
                 role="assistant",
                 content=" ".join(state["processed_response"]["parts"]),
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(),
                 metadata={
                     "strategy": state["current_strategy"],
                     "day_number": state["day_number"],
                     "has_question": state["processed_response"]["has_question"],
-                    "processing_time_ms": int((datetime.utcnow() - state["processing_start"]).total_seconds() * 1000)
+                    "processing_time_ms": int((datetime.now() - state["processing_start"]).total_seconds() * 1000)
                 }
             )
             context = MemoryContext(

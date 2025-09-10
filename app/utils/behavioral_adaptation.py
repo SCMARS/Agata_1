@@ -281,18 +281,26 @@ class BehavioralAdaptationModule:
     
     def _select_adaptive_strategy(self, current_stage: str, behavior_analysis: Dict,
                                  conversation_context: Dict = None) -> str:
-
+        current_time = datetime.now().strftime("%H:%M:%S")
+        
         recommended_strategy = behavior_analysis.get('recommended_strategy', 'mysterious')
         dominant_emotion = behavior_analysis.get('dominant_emotion', 'neutral')
         emotional_intensity = behavior_analysis.get('emotional_intensity', 0.5)
         intimacy_level = behavior_analysis.get('intimacy_preference', 'medium')
         
-        logger.info(f"🎭 [CHARACTER] Анализ пользователя: эмоция={dominant_emotion}, интенсивность={emotional_intensity:.2f}, близость={intimacy_level}")
+        logger.info(f"🎭 [{current_time}] [BEHAVIOR] === ВЫБОР СТРАТЕГИИ ===")
+        logger.info(f"   📊 Анализ пользователя:")
+        logger.info(f"     😊 Эмоция: {dominant_emotion}")
+        logger.info(f"     🔥 Интенсивность: {emotional_intensity:.2f}")
+        logger.info(f"     💕 Близость: {intimacy_level}")
+        logger.info(f"     🎯 Рекомендованная: {recommended_strategy}")
+        logger.info(f"     📍 Стейдж: {current_stage}")
         
         # Определяем стратегию на основе черт характера Агаты
         character_based_strategy = self._choose_strategy_by_character_traits(
             dominant_emotion, emotional_intensity, current_stage, behavior_analysis
         )
+        logger.info(f"   🎭 На основе характера Агаты: {character_based_strategy}")
         
         # Получаем доступные стратегии для текущего этапа
         stage_mapping = self.stage_strategy_mapping.get(current_stage, {})
@@ -300,25 +308,32 @@ class BehavioralAdaptationModule:
         secondary_strategies = stage_mapping.get('secondary_strategies', [])
         avoid_strategies = stage_mapping.get('avoid_strategies', [])
         
+        logger.info(f"   📋 Стратегии для {current_stage}:")
+        logger.info(f"     ✅ Основные: {primary_strategies}")
+        logger.info(f"     🟡 Вторичные: {secondary_strategies}")
+        logger.info(f"     ❌ Избегать: {avoid_strategies}")
+        
         # Проверяем приоритеты стратегий
         if character_based_strategy in primary_strategies:
             selected = character_based_strategy
-            logger.info(f"🎭 [CHARACTER] Выбрана стратегия {selected} (на основе черт характера + подходящая для {current_stage})")
+            reason = "характер + основная"
         elif recommended_strategy in primary_strategies:
             selected = recommended_strategy
-            logger.info(f"🎭 [CHARACTER] Выбрана стратегия {selected} (рекомендованная + подходящая для {current_stage})")
+            reason = "рекомендованная + основная"
         elif character_based_strategy in secondary_strategies:
             selected = character_based_strategy
-            logger.info(f"🎭 [CHARACTER] Выбрана стратегия {selected} (характер + вторичная для {current_stage})")
+            reason = "характер + вторичная"
         elif recommended_strategy in secondary_strategies:
             selected = recommended_strategy
-            logger.info(f"🎭 [CHARACTER] Выбрана стратегия {selected} (рекомендованная + вторичная для {current_stage})")
+            reason = "рекомендованная + вторичная"
         elif recommended_strategy not in avoid_strategies:
             selected = recommended_strategy
-            logger.info(f"🎭 [CHARACTER] Выбрана стратегия {selected} (рекомендованная + не запрещена для {current_stage})")
+            reason = "рекомендованная + не запрещена"
         else:
             selected = primary_strategies[0]
-            logger.info(f"🎭 [CHARACTER] Выбрана стратегия {selected} (лучшая из доступных для {current_stage})")
+            reason = "лучшая из доступных"
+            
+        logger.info(f"🎯 [{current_time}] [BEHAVIOR] ИТОГ: {selected} ({reason})")
         
         return selected
     

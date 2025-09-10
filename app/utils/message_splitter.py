@@ -145,42 +145,54 @@ class MessageSplitter:
         # Объединяем все части в один текст
         full_text = ' '.join(parts)
         
-        # Если короткий текст - не разделяем
-        if len(full_text) <= 180:
+        # Если короткий текст - НЕ разделяем (увеличен лимит)
+        if len(full_text) <= 250:
             return [full_text]
         
         # Ищем естественные места разрыва
         import re
         
-        # Лучшие места для разрыва (в порядке приоритета):
+        # Более естественные места для разрыва:
         natural_breaks = [
-            (r'\.\s+([А-ЯA-Z])', 'sentence'),      # После предложения + заглавная
-            (r'\?\s+([А-ЯA-Z])', 'question'),      # После вопроса + заглавная  
-            (r'!\s+([А-ЯA-Z])', 'exclamation'),    # После восклицания + заглавная
-            (r'\s+(А|И|Но|Кстати|Да)\s+', 'conjunction'),  # Союзы
-            (r',\s+(а|и|но)\s+', 'small_conjunction'),     # Маленькие союзы
+            (r'\.\s+([А-ЯA-Z][а-яa-z]{2,})', 'sentence'),      # После предложения + нормальное слово
+            (r'\?\s+([А-ЯA-Z][а-яa-z]{2,})', 'question'),      # После вопроса + нормальное слово  
+            (r'!\s+([А-ЯA-Z][а-яa-z]{2,})', 'exclamation'),    # После восклицания + нормальное слово
+            (r'\s+(А\s+как|И\s+вот|Но\s+на|Кстати\s+[а-я]|Да\s+[а-я])', 'good_conjunction'),  # Хорошие союзы с контекстом
+            (r'\s+(поэтому|потому|кстати|вообще|вот)\s+', 'connectors'),  # Связующие слова
         ]
         
         best_splits = []
         for pattern, break_type in natural_breaks:
-            for match in re.finditer(pattern, full_text):
-                split_pos = match.start() if break_type == 'conjunction' else match.start(1)
+            for match in re.finditer(pattern, full_text, re.IGNORECASE):
+                if break_type in ['sentence', 'question', 'exclamation']:
+                    split_pos = match.start(1)
+                else:
+                    split_pos = match.start()
                 best_splits.append((split_pos, break_type))
         
         if not best_splits:
             return [full_text]
         
-        # Находим разрыв ближе к середине
+        # Находим разрыв ближе к середине, но избегаем слишком коротких частей
         target = len(full_text) // 2
-        best_split = min(best_splits, key=lambda x: abs(x[0] - target))
+        valid_splits = []
         
+        for split_pos, break_type in best_splits:
+            part1_len = split_pos
+            part2_len = len(full_text) - split_pos
+            
+            # Минимальные длины увеличены для естественности
+            if part1_len >= 120 and part2_len >= 120:
+                valid_splits.append((split_pos, break_type))
+        
+        if not valid_splits:
+            return [full_text]
+        
+        best_split = min(valid_splits, key=lambda x: abs(x[0] - target))
         split_pos = best_split[0]
+        
         part1 = full_text[:split_pos].strip()
         part2 = full_text[split_pos:].strip()
-        
-        # Проверяем минимальные длины (увеличиваем для естественности)
-        if len(part1) < 100 or len(part2) < 100:
-            return [full_text]
             
         return [part1, part2]
     

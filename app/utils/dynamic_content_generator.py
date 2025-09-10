@@ -176,7 +176,21 @@ class DynamicContentGenerator:
             )
             
             import json
-            analysis = json.loads(response.choices[0].message.content)
+            import re
+            
+            content = response.choices[0].message.content.strip()
+            logger.info(f"🔍 [EMOTION_ANALYSIS] Сырой ответ OpenAI: '{content}'")
+            
+            # Убираем markdown блоки и извлекаем JSON
+            content = re.sub(r'```json\s*', '', content)
+            content = re.sub(r'```\s*$', '', content)
+            
+            # Попробуем извлечь JSON из ответа
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            if json_match:
+                content = json_match.group()
+            
+            analysis = json.loads(content)
             
             # Додаткова обробка для кращого логування
             logger.info(f"🔍 [EMOTION_ANALYSIS] Повідомлення: '{messages_text[:50]}...'")

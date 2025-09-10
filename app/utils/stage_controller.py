@@ -27,7 +27,7 @@ class StageController:
         if stage_number in self.stage_files_cache:
             return self.stage_files_cache[stage_number]
             
-        stage_file_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'agata_prompt_data', 'stages', f'stage_{stage_number}.txt')
+        stage_file_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'stages 2', f'stage_{stage_number}.txt')
         
         if os.path.exists(stage_file_path):
             try:
@@ -35,13 +35,77 @@ class StageController:
                     full_content = f.read()
                 
                 self.stage_files_cache[stage_number] = full_content
-                logger.info(f"📚 [STAGE] Завантажено повний текст стейджу {stage_number} ({len(full_content)} символів)")
+                logger.info(f"📚 [STAGE-{stage_number}] Завантажено повний текст стейджу ({len(full_content)} символів)")
+                
+                # Парсим временные вопросы и повседневность
+                time_questions = self._parse_time_questions_from_stage(full_content, stage_number)
+                daily_routine = self._parse_daily_routine_from_stage(full_content, stage_number)
+                
+                logger.info(f"⏰ [STAGE-{stage_number}] Парсингованнi часовi питання: {len(time_questions)} груп")
+                logger.info(f"📅 [STAGE-{stage_number}] Парсингована розпорядок дня: {len(daily_routine)} символів")
+                
                 return full_content
                 
             except Exception as e:
-                logger.error(f"❌ [STAGE] Помилка завантаження файлу стейджу {stage_number}: {e}")
+                logger.error(f"❌ [STAGE-{stage_number}] Помилка завантаження файлу стейджу: {e}")
         
-        logger.warning(f"⚠️ [STAGE] Файл стейджу {stage_number} не знайдено")
+        logger.warning(f"⚠️ [STAGE-{stage_number}] Файл стейджу не знайдено: {stage_file_path}")
+        return ""
+
+    def _parse_time_questions_from_stage(self, content: str, stage_number: int) -> Dict[str, List[str]]:
+        """Парсит временные вопросы из стейджа"""
+        import re
+        time_questions = {}
+        
+        logger.info(f"🔍 [STAGE-{stage_number}] Ищу временные вопросы в стейдже...")
+        
+        # Ищем секцию "Вопросы по времени суток:"
+        time_section_match = re.search(r'Вопросы по времени суток:\s*\n(.*?)(?=\n\n|\n[А-Я]|\Z)', content, re.DOTALL)
+        if time_section_match:
+            time_text = time_section_match.group(1)
+            logger.info(f"🔍 [STAGE-{stage_number}] Найдена секция временных вопросов: {repr(time_text[:100])}")
+            
+            # Парсим строки вида "Утро: «...», «...»"
+            for line in time_text.split('\n'):
+                line = line.strip()
+                if ':' in line and '«' in line:
+                    time_period = line.split(':')[0].strip().lower()
+                    questions_text = line.split(':', 1)[1]
+                    
+                    logger.info(f"🔍 [STAGE-{stage_number}] Обрабатываю строку: {repr(line)}")
+                    logger.info(f"🔍 [STAGE-{stage_number}] time_period: '{time_period}'")
+                    
+                    # Извлекаем вопросы в кавычках
+                    questions = re.findall(r'«([^»]+)»', questions_text)
+                    if questions:
+                        time_questions[time_period] = questions
+                        logger.info(f"⏰ [STAGE-{stage_number}] {time_period}: {questions}")
+        else:
+            logger.warning(f"⚠️ [STAGE-{stage_number}] Секция 'Вопросы по времени суток:' НЕ найдена!")
+        
+        logger.info(f"⏰ [STAGE-{stage_number}] Итого временных вопросов: {time_questions}")
+        return time_questions
+
+    def _parse_daily_routine_from_stage(self, content: str, stage_number: int) -> str:
+        """Парсит повседневность из стейджа"""
+        import re
+        
+        logger.info(f"🔍 [STAGE-{stage_number}] Ищу повседневность в стейдже...")
+        
+        # Ищем секцию "Повседневность" (может быть "Повседневность\n" или "Распорядок дня")
+        patterns = [
+            r'Повседневность.*?\n((?:\d{2}:\d{2}.*?\n?)+)',
+            r'Распорядок дня.*?\n((?:\d{2}:\d{2}.*?\n?)+)',
+        ]
+        
+        for pattern in patterns:
+            routine_match = re.search(pattern, content, re.DOTALL)
+            if routine_match:
+                routine = routine_match.group(1).strip()
+                logger.info(f"📅 [STAGE-{stage_number}] Найден распорядок дня ({len(routine)} символов): {repr(routine[:100])}")
+                return routine
+        
+        logger.warning(f"⚠️ [STAGE-{stage_number}] Секция 'Повседневность' НЕ найдена!")
         return ""
         
     def _load_stage_rules(self) -> Dict[str, Any]:
@@ -196,23 +260,36 @@ class StageController:
         }
     
     def get_user_stage(self, user_id: str, message_count: int) -> int:
-        """Определяет текущий стейдж пользователя"""
+
+        current_time = datetime.now().strftime("%H:%M:%S")
+        
         if user_id not in self.user_stages:
             self.user_stages[user_id] = 1
-            logger.info(f"🎯 [STAGE] Пользователь {user_id} начал стейдж 1 (Знакомство)")
+            logger.info(f"🎯 [{current_time}] [STAGE] Пользователь {user_id} начал стейдж 1 (Знакомство)")
         
-        # Логика перехода между стейджами
-        if message_count <= 3:
+        # Логика перехода между стейджами (исправлена согласно требованиям)
+        if message_count <= 5:
             stage = 1
-        elif message_count <= 8:
-            stage = 2
+            stage_name = "Знакомство"
+        elif message_count <= 15:
+            stage = 2  
+            stage_name = "Дружба/флирт"
         else:
             stage = 3
+            stage_name = "Вброс"
             
         if self.user_stages[user_id] != stage:
             old_stage = self.user_stages[user_id]
+            old_stage_names = {1: "Знакомство", 2: "Дружба/флирт", 3: "Вброс"}
+            old_stage_name = old_stage_names.get(old_stage, f"Стейдж {old_stage}")
+            
             self.user_stages[user_id] = stage
-            logger.info(f"🔄 [STAGE] Пользователь {user_id} перешел со стейджа {old_stage} на {stage}")
+            logger.info(f"🔄 [{current_time}] [STAGE] Пользователь {user_id}:")
+            logger.info(f"   📊 Сообщений: {message_count}")
+            logger.info(f"   ⬆️  Переход: {old_stage_name} → {stage_name}")
+            logger.info(f"   🎯 Новый стейдж: {stage} ({stage_name})")
+        else:
+            logger.info(f"📍 [{current_time}] [STAGE] Пользователь {user_id}: стейдж {stage} ({stage_name}), сообщений: {message_count}")
         
         return stage
     
@@ -402,68 +479,48 @@ class StageController:
     
     def get_time_based_questions(self, stage_number: int) -> Dict[str, List[str]]:
         """Повертає питання базовані на часі доби для поточного стейджу"""
+        current_time = datetime.now().strftime("%H:%M:%S")
+        logger.info(f"⏰ [{current_time}] [STAGE-{stage_number}] === ОТРИМАННЯ ЧАСОВИХ ПИТАНЬ ===")
+        
         # Завантажуємо повний текст стейджу
         stage_content = self._load_full_stage_content(stage_number)
         
-        # Шукаємо секцію з питаннями по часу
-        time_questions = {
-            "morning": ["Как спалось?", "Что планируешь сегодня?", "Завтракал?"],
-            "day": ["Как проходит день?", "Что ел на обед?", "Много дел?"], 
-            "evening": ["Какие планы на вечер?", "Во сколько примерно ложишься спать?"]
+        # Парсим временные вопросы из стейджа
+        stage_time_questions = self._parse_time_questions_from_stage(stage_content, stage_number)
+        
+        # Fallback значения если в стейдже нет временных вопросов
+        default_questions = {
+            "утро": ["Как спалось?", "Что планируешь сегодня?", "Завтракал?"],
+            "день": ["Как проходит день?", "Что ел на обед?", "Много дел?"], 
+            "вечер": ["Какие планы на вечер?", "Во сколько примерно ложишься спать?"]
         }
         
-        # Парсимо з тексту стейджу, якщо є спеціальні питання
-        if "Вопросы по времени суток" in stage_content:
-            try:
-                time_section = stage_content.split("Вопросы по времени суток")[1].split("\n\n")[0]
-                
-                if "Утро:" in time_section:
-                    morning_match = re.search(r'Утро:\s*(.+)', time_section)
-                    if morning_match:
-                        morning_questions = [q.strip(' "«»') for q in morning_match.group(1).split(',')]
-                        time_questions["morning"] = morning_questions
-                        
-                if "День:" in time_section:
-                    day_match = re.search(r'День:\s*(.+)', time_section)
-                    if day_match:
-                        day_questions = [q.strip(' "«»') for q in day_match.group(1).split(',')]
-                        time_questions["day"] = day_questions
-                        
-                if "Вечер:" in time_section:
-                    evening_match = re.search(r'Вечер:\s*(.+)', time_section)
-                    if evening_match:
-                        evening_questions = [q.strip(' "«»') for q in evening_match.group(1).split(',')]
-                        time_questions["evening"] = evening_questions
-                        
-                logger.info(f"⏰ [STAGE] Завантажено часові питання для стейджу {stage_number}")
-                
-            except Exception as e:
-                logger.error(f"❌ [STAGE] Помилка парсингу часових питань: {e}")
+        # Используем временные вопросы из стейджа или fallback
+        result_questions = stage_time_questions if stage_time_questions else default_questions
         
-        return time_questions
+        logger.info(f"⏰ [{current_time}] [STAGE-{stage_number}] Загружено {len(result_questions)} групп временных вопросов:")
+        for period, questions in result_questions.items():
+            logger.info(f"   📅 {period}: {len(questions)} вопросов - {questions[:2]}...")
+        
+        return result_questions
     
     def get_daily_schedule_example(self, stage_number: int) -> str:
         """Повертає приклад розпорядку дня для стейджу"""
+        current_time = datetime.now().strftime("%H:%M:%S")
+        logger.info(f"📅 [{current_time}] [STAGE-{stage_number}] === ОТРИМАННЯ РОЗПОРЯДКУ ДНЯ ===")
+        
         stage_content = self._load_full_stage_content(stage_number)
         
-        # Шукаємо секцію Повседневность
-        if "Повседневность" in stage_content:
-            try:
-                schedule_section = stage_content.split("Повседневность")[1]
-                if stage_number == 3:
-                    # Для стейджу 3 беремо "Распорядок дня"
-                    schedule_section = schedule_section.split("Распорядок дня")[1].split("Вопросы по времени")[0]
-                else:
-                    # Для інших стейджів беремо до наступної секції
-                    schedule_section = schedule_section.split("Вопросы по времени")[0]
-                
-                logger.info(f"📅 [STAGE] Завантажено розпорядок дня для стейджу {stage_number}")
-                return schedule_section.strip()
-                
-            except Exception as e:
-                logger.error(f"❌ [STAGE] Помилка отримання розпорядку дня: {e}")
+        # Парсим повседневность из стейджа
+        daily_routine = self._parse_daily_routine_from_stage(stage_content, stage_number)
         
-        return ""
+        if daily_routine:
+            logger.info(f"📅 [{current_time}] [STAGE-{stage_number}] Завантажено розпорядок дня ({len(daily_routine)} символів)")
+            logger.info(f"📅 [{current_time}] [STAGE-{stage_number}] Приклад: {daily_routine[:50]}...")
+            return daily_routine
+        else:
+            logger.warning(f"📅 [{current_time}] [STAGE-{stage_number}] Розпорядок дня не знайдено")
+            return ""
     
     def get_response_structure_instructions(self, stage_number: int) -> str:
         """Получает инструкции по структуре ответа для стейджа"""

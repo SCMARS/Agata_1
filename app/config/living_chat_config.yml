@@ -2,11 +2,11 @@
 living_chat:
   # Настройки разбиения сообщений
   message_splitting:
-    max_length: 120  # Збільшуємо довжину
-    force_split_threshold: 80  # Збільшуємо поріг
-    min_delay_ms: 2000  # 2 секунди
-    max_delay_ms: 5000  # 5 секунд
-    max_parts: 3  # Максимум 3 части
+    max_length: 200  # Увеличиваем для более естественных сообщений
+    force_split_threshold: 300  # Разбиваем только очень длинные сообщения
+    min_delay_ms: 1500  # 1.5 секунды
+    max_delay_ms: 3500  # 3.5 секунды  
+    max_parts: 2  # Максимум 2 части для естественности
   
   # Настройки коротких сообщений
   short_messages:
@@ -36,4 +36,5 @@ living_chat:
     use_parentheses: false  
     use_contractions: true 
     max_emoji_per_message: 1
+    emoji_frequency: 0.3  # 30% сообщений с эмодзи (не все)
     casual_expressions: true
