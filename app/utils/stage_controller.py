@@ -1,6 +1,8 @@
 """
 Контроллер стейджей общения с логами и правилами
 """
+import os
+import re
 import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
@@ -16,7 +18,31 @@ class StageController:
         self.stage_rules = self._load_stage_rules()
         self.user_stages = {}  
         self.user_question_counts = {}  
-        self.user_last_activity = {}  
+        self.user_last_activity = {}
+        self.stage_files_cache = {}  # stage_number -> full_text
+        logger.info("🎯 [STAGE] StageController ініціалізовано з кешем файлів")
+        
+    def _load_full_stage_content(self, stage_number: int) -> str:
+        """Завантажує ПОВНИЙ текст стейджу з файлу для використання в промпті"""
+        if stage_number in self.stage_files_cache:
+            return self.stage_files_cache[stage_number]
+            
+        stage_file_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'agata_prompt_data', 'stages', f'stage_{stage_number}.txt')
+        
+        if os.path.exists(stage_file_path):
+            try:
+                with open(stage_file_path, 'r', encoding='utf-8') as f:
+                    full_content = f.read()
+                
+                self.stage_files_cache[stage_number] = full_content
+                logger.info(f"📚 [STAGE] Завантажено повний текст стейджу {stage_number} ({len(full_content)} символів)")
+                return full_content
+                
+            except Exception as e:
+                logger.error(f"❌ [STAGE] Помилка завантаження файлу стейджу {stage_number}: {e}")
+        
+        logger.warning(f"⚠️ [STAGE] Файл стейджу {stage_number} не знайдено")
+        return ""
         
     def _load_stage_rules(self) -> Dict[str, Any]:
         """Загружает правила для каждого стейджа согласно новой системе"""
@@ -312,16 +338,34 @@ class StageController:
     def get_stage_progress(self, user_id: str, stage_number: int) -> Dict[str, Any]:
         """Получает прогресс по текущему стейджу"""
         stage_rules = self.stage_rules.get(stage_number, {})
+        questions_asked = self.user_question_counts.get(user_id, 0)
+        themes = stage_rules.get("themes", {})
         
-        return {
+        # Завантажуємо ПОВНИЙ текст стейджу з файлу
+        full_stage_content = self._load_full_stage_content(stage_number)
+        
+        progress = {
             "stage_name": stage_rules.get("name", f"Stage {stage_number}"),
             "description": stage_rules.get("description", ""),
-            "themes": stage_rules.get("themes", {}),
-            "questions_asked": self.user_question_counts.get(user_id, 0),
+            "themes": themes,
+            "questions_asked": questions_asked,
             "max_questions_per_session": stage_rules.get("max_questions_per_session", 1),
             "response_structure": stage_rules.get("response_structure", {}),
-            "transition_markers": stage_rules.get("transition_markers", [])
+            "transition_markers": stage_rules.get("transition_markers", []),
+            "full_stage_text": full_stage_content  # 🔥 ДОДАЄМО ПОВНИЙ ТЕКСТ СТЕЙДЖУ
         }
+        
+        logger.info(f"📊 [STAGE_PROGRESS] {user_id}: Стейдж {stage_number} ({progress['stage_name']})")
+        logger.info(f"📊 [STAGE_PROGRESS] {user_id}: Вопросов задано {questions_asked}/{progress['max_questions_per_session']}")
+        logger.info(f"📊 [STAGE_PROGRESS] {user_id}: Тем доступно: {len(themes)}")
+        
+        # Логируем каждую тему
+        for theme_name, theme_data in themes.items():
+            slots = theme_data.get("slots", [])
+            completed = theme_data.get("completed", False)
+            logger.info(f"📊 [STAGE_PROGRESS] {user_id}: Тема '{theme_name}': {len(slots)} слотов, завершена: {completed}")
+        
+        return progress
     
     def get_next_theme_and_slot(self, user_id: str, stage_number: int) -> Optional[Dict[str, Any]]:
         """Определяет следующую тему и слот для вопроса"""
@@ -355,6 +399,71 @@ class StageController:
         # Здесь можно добавить логику для отслеживания завершенных слотов
         # Пока просто логируем
         logger.info(f"[STAGE] Пользователь {user_id} завершил слот '{slot}' в теме '{theme_name}' (этап {stage_number})")
+    
+    def get_time_based_questions(self, stage_number: int) -> Dict[str, List[str]]:
+        """Повертає питання базовані на часі доби для поточного стейджу"""
+        # Завантажуємо повний текст стейджу
+        stage_content = self._load_full_stage_content(stage_number)
+        
+        # Шукаємо секцію з питаннями по часу
+        time_questions = {
+            "morning": ["Как спалось?", "Что планируешь сегодня?", "Завтракал?"],
+            "day": ["Как проходит день?", "Что ел на обед?", "Много дел?"], 
+            "evening": ["Какие планы на вечер?", "Во сколько примерно ложишься спать?"]
+        }
+        
+        # Парсимо з тексту стейджу, якщо є спеціальні питання
+        if "Вопросы по времени суток" in stage_content:
+            try:
+                time_section = stage_content.split("Вопросы по времени суток")[1].split("\n\n")[0]
+                
+                if "Утро:" in time_section:
+                    morning_match = re.search(r'Утро:\s*(.+)', time_section)
+                    if morning_match:
+                        morning_questions = [q.strip(' "«»') for q in morning_match.group(1).split(',')]
+                        time_questions["morning"] = morning_questions
+                        
+                if "День:" in time_section:
+                    day_match = re.search(r'День:\s*(.+)', time_section)
+                    if day_match:
+                        day_questions = [q.strip(' "«»') for q in day_match.group(1).split(',')]
+                        time_questions["day"] = day_questions
+                        
+                if "Вечер:" in time_section:
+                    evening_match = re.search(r'Вечер:\s*(.+)', time_section)
+                    if evening_match:
+                        evening_questions = [q.strip(' "«»') for q in evening_match.group(1).split(',')]
+                        time_questions["evening"] = evening_questions
+                        
+                logger.info(f"⏰ [STAGE] Завантажено часові питання для стейджу {stage_number}")
+                
+            except Exception as e:
+                logger.error(f"❌ [STAGE] Помилка парсингу часових питань: {e}")
+        
+        return time_questions
+    
+    def get_daily_schedule_example(self, stage_number: int) -> str:
+        """Повертає приклад розпорядку дня для стейджу"""
+        stage_content = self._load_full_stage_content(stage_number)
+        
+        # Шукаємо секцію Повседневность
+        if "Повседневность" in stage_content:
+            try:
+                schedule_section = stage_content.split("Повседневность")[1]
+                if stage_number == 3:
+                    # Для стейджу 3 беремо "Распорядок дня"
+                    schedule_section = schedule_section.split("Распорядок дня")[1].split("Вопросы по времени")[0]
+                else:
+                    # Для інших стейджів беремо до наступної секції
+                    schedule_section = schedule_section.split("Вопросы по времени")[0]
+                
+                logger.info(f"📅 [STAGE] Завантажено розпорядок дня для стейджу {stage_number}")
+                return schedule_section.strip()
+                
+            except Exception as e:
+                logger.error(f"❌ [STAGE] Помилка отримання розпорядку дня: {e}")
+        
+        return ""
     
     def get_response_structure_instructions(self, stage_number: int) -> str:
         """Получает инструкции по структуре ответа для стейджа"""

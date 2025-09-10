@@ -156,9 +156,12 @@ class PromptLoader:
             persona_files = [
                 "agata_bio_01_childhood.txt",
                 "agata_bio_02_study_and_first_job.txt",
-                "agata_bio_03_warsaw_and_present.txt",
-                "agata_bio_04_personality_and_character.txt",
-                "agata_bio_05_dreams_and_future.txt"
+                "agata_bio_03_move_to_warsaw.txt",
+                "agata_bio_04_career_growth.txt",
+                "agata_bio_05_appearance_health.txt",
+                "agata_bio_06_lifestyle_trading.txt",
+                "agata_bio_07_personal_life.txt",
+                "agata_bio_08_character.txt"
             ]
 
             persona_parts = []

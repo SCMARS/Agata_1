@@ -202,7 +202,7 @@ class AgathaPipeline:
             result = await self.graph.ainvoke(state)
             log_info(f"✅ LangGraph Pipeline COMPLETED: {result}")
             
-            # Возвращаем полный результат с behavioral analysis
+            # Возвращаем ПОЛНЫЙ результат с behavioral analysis и данными стейджа
             return {
                 "parts": result["processed_response"].get("parts", []),
                 "has_question": result["processed_response"].get("has_question", False),
@@ -210,7 +210,19 @@ class AgathaPipeline:
                 "behavioral_analysis": result.get("behavioral_analysis", {}),
                 "current_strategy": result.get("current_strategy", "unknown"),
                 "stage_number": result.get("stage_number", 1),
-                "day_number": result.get("day_number", 1)
+                "day_number": result.get("day_number", 1),
+                # 🔥 ДОДАЄМО ВСІ ДАНІ СТЕЙДЖУ ДЛЯ TELEGRAM БОТА
+                "stage_progress": result.get("stage_progress", {}),
+                "next_theme_slot": result.get("next_theme_slot", {}),
+                "response_structure_instructions": result.get("response_structure_instructions", ""),
+                "full_stage_text": result.get("full_stage_text", "") or result.get("stage_progress", {}).get("full_stage_text", ""),
+                "time_questions": result.get("time_questions", ""),
+                "daily_schedule": result.get("daily_schedule", ""),
+                "time_period": result.get("time_period", "evening"),
+                "memory_stats": {
+                    "short_memory": len(str(result.get("memory_context", ""))),
+                    "has_memory": bool(result.get("memory_context"))
+                }
             }
         except Exception as e:
             log_info(f"❌ LangGraph Pipeline FAILED: {e}")

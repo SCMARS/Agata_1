@@ -2,89 +2,30 @@
 Behavioral Analyzer - модуль анализа поведения пользователя для выбора стратегий
 """
 import re
+import os
+import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Tuple
 from collections import Counter
+from .dynamic_content_generator import DynamicContentGenerator
+
+logger = logging.getLogger(__name__)
 
 class BehavioralAnalyzer:
-    """
-    Анализирует поведение пользователя и выбирает оптимальную стратегию поведения для Agatha
-    
-    Зона ответственности:
-    1. Анализ сообщений пользователя (эмоции, темы, паттерны)
-    2. Выбор поведенческой стратегии на основе анализа
-    3. Подготовка динамических правил поведения для PromptComposer
-    """
+
     
     def __init__(self):
-        # Эмоциональные паттерны для анализа состояний пользователя
-        self.emotion_patterns = {
-            'positive': {
-                'keywords': ['отлично', 'хорошо', 'прекрасно', 'замечательно', 'великолепно', 
-                           'радуюсь', 'счастлив', 'восторг', 'ура', 'супер', 'класс', 'круто'],
-                'emojis': ['😊', '😄', '😁', '🎉', '👍', '❤️', '😍'],
-                'punctuation': ['!', '!!']
-            },
-            'negative': {
-                'keywords': ['плохо', 'ужасно', 'грустно', 'депрессия', 'проблемы', 'беда',
-                           'потерял', 'потеря', 'не знаю что делать', 'валится из рук',
-                           'расстроен', 'подавлен', 'тяжело', 'трудно', 'кошмар'],
-                'emojis': ['😢', '😭', '😞', '💔', '😔', '😟'],
-                'punctuation': ['...', '((', '))']
-            },
-            'excited': {
-                'keywords': ['возбужден', 'взволнован', 'не могу дождаться', 'предвкушение',
-                           'обожаю', 'обалдеть', 'невероятно', 'потрясающе'],
-                'emojis': ['🤩', '😲', '🚀', '⚡'],
-                'punctuation': ['!!!', '!?']
-            },
-            'angry': {
-                'keywords': ['злой', 'бесит', 'раздражает', 'ненавижу', 'достал', 'надоело',
-                           'сил нет', 'идиот', 'дурак', 'глупо', 'возмущен'],
-                'emojis': ['😠', '😡', '🤬', '💢'],
-                'punctuation': ['!', '!!!']
-            },
-            'anxious': {
-                'keywords': ['беспокоюсь', 'волнуюсь', 'переживаю', 'тревожно', 'боюсь',
-                           'нервничаю', 'стресс', 'паника', 'страшно'],
-                'emojis': ['😰', '😨', '😬', '🤯'],
-                'punctuation': ['...']
-            },
-            'tired': {
-                'keywords': ['устал', 'усталость', 'выматывает', 'нет сил', 'измотан',
-                           'сложный день', 'тяжелый день', 'много работы'],
-                'emojis': ['😴', '🥱', '😪'],
-                'punctuation': ['...']
-            },
-            'confused': {
-                'keywords': ['не понимаю', 'запутался', 'сложно', 'непонятно', 'не знаю',
-                           'что делать', 'как быть', 'растерян'],
-                'emojis': ['😕', '🤔', '😵‍💫'],
-                'punctuation': ['???', '??']
-            }
-        }
+        # Инициализируем покращений генератор контенту
+        api_key = os.getenv('OPENAI_API_KEY')
+        if api_key:
+            self.dynamic_generator = DynamicContentGenerator()
+            logger.info("🔍 [BEHAVIORAL] DynamicContentGenerator ініціалізований для покращеного аналізу емоцій")
+        else:
+            self.dynamic_generator = None
+            logger.warning("🔍 [BEHAVIORAL] OpenAI API ключ не найден, используется fallback")
         
-        # Темы разговора
-        self.topic_patterns = {
-            'personal_life': ['семья', 'отношения', 'любовь', 'дружба', 'личное'],
-            'work_career': ['работа', 'карьера', 'профессия', 'коллеги', 'начальник', 'проект'],
-            'hobbies': ['хобби', 'увлечение', 'спорт', 'музыка', 'игры', 'чтение', 'фильмы'],
-            'health': ['здоровье', 'болею', 'врач', 'лечение', 'самочувствие', 'боль'],
-            'dreams_goals': ['мечты', 'цели', 'планы', 'хочу', 'надеюсь', 'стремлюсь'],
-            'problems': ['проблема', 'трудности', 'сложности', 'не получается', 'помощь'],
-            'philosophical': ['смысл', 'жизнь', 'душа', 'мысли', 'размышления', 'философия']
-        }
-        
-        # Паттерны коммуникации
-        self.communication_patterns = {
-            'question_heavy': r'\?.*\?|\? .+\?',  # Много вопросов
-            'exclamation_heavy': r'!.*!|! .+!',  # Много восклицаний
-            'long_sentences': r'.{100,}',  # Длинные предложения
-            'short_bursts': r'^.{1,20}$',  # Короткие сообщения
-            'storytelling': r'(сначала|потом|затем|в итоге|история)',  # Рассказывание историй
-            'seeking_advice': r'(что делать|как быть|посоветуй|помоги)',  # Просьба совета
-            'sharing_emotions': r'(чувствую|ощущаю|переживаю|настроение)'  # Делится эмоциями
-        }
+        # Видаляємо весь хардкод! Тепер використовуємо тільки OpenAI API для аналізу
+        logger.info("🔥 [BEHAVIORAL] Хардкод видалено! Використовуємо тільки динамічний аналіз через OpenAI")
     
     def analyze_user_behavior(self, messages: List[Dict], user_profile: Dict = None,
                                   conversation_context: Dict = None) -> Dict[str, Any]:
@@ -153,60 +94,151 @@ class BehavioralAnalyzer:
         }
     
     def _analyze_emotions(self, content: str, messages: List[Dict]) -> Dict[str, Any]:
-        """Анализ эмоционального состояния"""
+        """ДИНАМІЧНИЙ аналіз емоційного стану через OpenAI API"""
+        
+        # Якщо є покращений генератор - використовуємо його
+        if self.dynamic_generator:
+            try:
+                # Формуємо список контенту для аналізу
+                message_contents = [msg.get('content', '') for msg in messages[-3:]]  # Останні 3 повідомлення
+                
+                # Викликаємо покращений аналіз емоцій
+                openai_analysis = self.dynamic_generator.analyze_message_emotions(message_contents)
+                
+                # Мапимо результат на наш формат
+                emotion_mapping = {
+                    'positive': 'positive',
+                    'negative': 'negative', 
+                    'neutral': 'neutral',
+                    'excited': 'excited',
+                    'sad': 'negative',
+                    'angry': 'angry',
+                    'frustrated': 'angry',
+                    'anxious': 'anxious',
+                    'playful': 'excited',
+                    'intellectual': 'intellectual',
+                    'rude': 'angry'
+                }
+                
+                dominant_emotion = emotion_mapping.get(openai_analysis.get('emotion', 'neutral'), 'neutral')
+                intensity = float(openai_analysis.get('intensity', 0.5))
+                
+                # Обчислюємо стабільність
+                stability = self._calculate_emotional_stability(messages)
+                
+                logger.info(f"🔍 [EMOTION_AI] ДИНАМІЧНИЙ аналіз: {dominant_emotion} (інтенсивність: {intensity:.2f})")
+                
+                return {
+                    'dominant_emotion': dominant_emotion,
+                    'intensity': intensity,
+                    'stability': stability,
+                    'ai_analysis': openai_analysis,  # Зберігаємо повний аналіз
+                    'analysis_method': 'openai_dynamic'
+                }
+                
+            except Exception as e:
+                logger.error(f"❌ [EMOTION_AI] Помилка динамічного аналізу: {e}")
+                # Fallback до простого аналізу
+                pass
+        
+        # FALLBACK: простий аналіз без хардкоду
+        logger.warning("🔍 [EMOTION_FALLBACK] Використовуємо спрощений аналіз")
+        
+        # Простий аналіз тону без хардкоду
         content_lower = content.lower()
-        emotion_scores = {}
         
-        # Подсчет эмоциональных маркеров
-        for emotion, patterns in self.emotion_patterns.items():
-            score = 0
-            
-            # Ключевые слова
-            for keyword in patterns['keywords']:
-                score += content_lower.count(keyword) * 2
-            
-            # Эмодзи
-            for emoji in patterns['emojis']:
-                score += content.count(emoji) * 3
-            
-            # Пунктуация
-            for punct in patterns['punctuation']:
-                score += content.count(punct) * 1
-            
-            emotion_scores[emotion] = score
+        # Детальний аналіз на основі конкретних маркерів
+        rude_words = ['нахуй', 'дура', 'дурочка', 'бесишь', 'идиот', 'идиотка', 'сука', 'блядь', 'пиздец']
+        positive_words = ['круто', 'классно', 'отлично', 'супер', 'молодец', 'хорошо', '😊', '😄']
+        negative_words = ['грустно', 'плохо', 'тяжело', 'печально', 'больно', '😢', '😭']
+        excited_words = ['ого', 'вау', 'ничего себе', 'обалдеть', 'невероятно', '🤩', '😲']
         
-        # Определяем доминирующую эмоцию
-        if not any(emotion_scores.values()):
-            dominant_emotion = 'neutral'
-            intensity = 0.3
+        if any(word in content_lower for word in rude_words):
+            dominant_emotion = 'rude'  # Конкретно grубость, не просто angry
+            intensity = 0.9  # Високий рівень
+            logger.info(f"🔍 [EMOTION_FALLBACK] Виявлено ГРУБІСТЬ: {[w for w in rude_words if w in content_lower]}")
+        elif any(word in content_lower for word in positive_words):
+            dominant_emotion = 'positive' 
+            intensity = 0.6
+        elif any(word in content_lower for word in negative_words):
+            dominant_emotion = 'negative'
+            intensity = 0.7
+        elif any(word in content_lower for word in excited_words):
+            dominant_emotion = 'excited'
+            intensity = 0.7
         else:
-            dominant_emotion = max(emotion_scores, key=emotion_scores.get)
-            max_score = emotion_scores[dominant_emotion]
-            intensity = min(max_score / 10.0, 1.0)  # Нормализуем к 0-1
+            dominant_emotion = 'neutral'
+            intensity = 0.4
         
-        # Анализ эмоциональной стабильности (изменения эмоций между сообщениями)
-        stability = self._calculate_emotional_stability(messages)
+        stability = 0.5  # Середня стабільність для fallback
         
         return {
             'dominant_emotion': dominant_emotion,
             'intensity': intensity,
             'stability': stability,
-            'emotion_scores': emotion_scores
+            'analysis_method': 'fallback_simple'
         }
     
     def _analyze_topics(self, content: str) -> Dict[str, Any]:
-        """Анализ тем разговора"""
-        content_lower = content.lower()
-        topic_scores = {}
+        """ДИНАМІЧНИЙ аналіз тем через OpenAI API"""
         
-        for topic, keywords in self.topic_patterns.items():
-            score = sum(content_lower.count(keyword) for keyword in keywords)
-            if score > 0:
-                topic_scores[topic] = score
+        if self.dynamic_generator:
+            try:
+                # Генеруємо аналіз тем через OpenAI
+                prompt = f"""
+                Проаналізуй основні теми у цьому тексті: "{content}"
+                
+                Визначи ДО 3 основних тем з цього списку:
+                - general (загальне спілкування, привітання)
+                - personal_life (особисте життя, відносини, сім'я)
+                - work_career (робота, кар'єра, професія)
+                - hobbies (хобі, інтереси, спорт, музика)
+                - health (здоров'я, самопочуття)
+                - dreams_goals (мрії, цілі, плани)
+                - problems (проблеми, труднощі)
+                - emotions (емоції, настрій, почуття)
+                - philosophy (філософські роздуми)
+                - entertainment (розваги, жарти, веселощі)
+                
+                Поверни JSON:
+                {{
+                    "primary_topics": ["тема1", "тема2"],
+                    "focus_level": "focused/diverse/scattered",
+                    "main_subject": "коротка назва головної теми"
+                }}
+                """
+                
+                response = self.dynamic_generator.client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3,
+                    max_tokens=100
+                )
+                
+                import json
+                topics_analysis = json.loads(response.choices[0].message.content)
+                
+                logger.info(f"🔍 [TOPICS_AI] ДИНАМІЧНИЙ аналіз тем: {topics_analysis.get('primary_topics', [])}")
+                
+                return {
+                    'primary_topics': topics_analysis.get('primary_topics', ['general']),
+                    'focus_level': topics_analysis.get('focus_level', 'diverse'),
+                    'main_subject': topics_analysis.get('main_subject', 'загальне спілкування'),
+                    'analysis_method': 'openai_dynamic'
+                }
+                
+            except Exception as e:
+                logger.error(f"❌ [TOPICS_AI] Помилка аналізу тем: {e}")
+                # Fallback
+                pass
         
-        # Сортируем темы по важности
-        sorted_topics = sorted(topic_scores.items(), key=lambda x: x[1], reverse=True)
-        primary_topics = [topic for topic, score in sorted_topics[:3]]
+        # FALLBACK: простий аналіз без хардкоду
+        logger.warning("🔍 [TOPICS_FALLBACK] Використовуємо спрощений аналіз тем")
+        return {
+            'primary_topics': ['general'],
+            'focus_level': 'diverse',
+            'analysis_method': 'fallback_simple'
+        }
         
         # Определяем уровень фокуса на темах
         total_score = sum(topic_scores.values())

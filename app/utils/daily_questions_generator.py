@@ -52,19 +52,29 @@ class DailyQuestionsGenerator:
         # Определяем время суток
         time_of_day = self._get_time_of_day(current_hour)
         
+        logger.info(f"⏰ [DAILY_QUESTIONS] Текущее время: {current_hour}:xx ({time_of_day})")
+        logger.info(f"⏰ [DAILY_QUESTIONS] День недели: {current_weekday} (0=Пн, 6=Вс)")
+        logger.info(f"⏰ [DAILY_QUESTIONS] Этап: {stage}")
+        
         # Получаем вопросы для этапа
         stage_questions = self.config.get_daily_questions(stage)
+        logger.info(f"⏰ [DAILY_QUESTIONS] Вопросов для этапа {stage}: {len(stage_questions)}")
         
         # Добавляем контекстные вопросы в зависимости от времени
         contextual_questions = self._get_contextual_questions(time_of_day, current_weekday)
+        logger.info(f"⏰ [DAILY_QUESTIONS] Контекстных вопросов для {time_of_day}: {len(contextual_questions)}")
         
         # Объединяем все вопросы
         all_questions = stage_questions + contextual_questions
+        logger.info(f"⏰ [DAILY_QUESTIONS] Всего доступных вопросов: {len(all_questions)}")
         
         # Выбираем случайный вопрос
         if all_questions:
-            return random.choice(all_questions)
+            selected_question = random.choice(all_questions)
+            logger.info(f"⏰ [DAILY_QUESTIONS] Выбран вопрос: '{selected_question}'")
+            return selected_question
         else:
+            logger.warning(f"⏰ [DAILY_QUESTIONS] Нет доступных вопросов, используем fallback")
             return "как дела?"
     
     def _get_time_of_day(self, hour: int) -> str:

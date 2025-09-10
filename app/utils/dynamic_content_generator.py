@@ -133,46 +133,70 @@ class DynamicContentGenerator:
             return "і"  # Fallback
     
     def analyze_message_emotions(self, messages: List[str]) -> Dict[str, Any]:
-        """Аналізує емоції в повідомленнях користувача"""
+        """Покращений аналіз емоцій з урахуванням характеру Агати"""
         try:
             messages_text = " ".join(messages)
-            prompt = f"""
-            Проаналізуй емоційний тон цих повідомлень: "{messages_text}"
             
-            Визначи:
-            1. Основну емоцію (positive/neutral/negative)
-            2. Інтенсивність (0.0-1.0)
-            3. Тип повідомлення (question/statement/greeting/story)
-            4. Рівень ентузіазму (low/medium/high)
+
+            prompt = f"""
+            Проаналізуй емоційний тон та характер цих повідомлень: "{messages_text}"
+            
+            Визначи ДЕТАЛЬНО:
+            1. Основну емоцію: positive/negative/neutral/excited/sad/angry/frustrated/anxious/playful/intellectual/rude
+            2. Інтенсивність емоції (0.0-1.0): 0.1-0.3=слабо, 0.4-0.6=помірно, 0.7-0.9=сильно, 1.0=дуже сильно
+            3. Тип повідомлення: question/statement/greeting/story/complaint/joke/flirt/insult
+            4. Стиль спілкування: friendly/formal/casual/aggressive/analytical/emotional/playful/rude
+            5. Потребу у відповіді: support/information/entertainment/argument/flirt/casual_chat
+            6. Рівень поваги: respectful/neutral/disrespectful/rude
+            
+            ОСОБЛИВА УВАГА до:
+            - Грубості, образ, нецензурної лексики
+            - Агресивності та негативу  
+            - Інтелектуального рівня спілкування
+            - Емоційного стану користувача
             
             Поверни у форматі JSON:
             {{
-                "emotion": "positive/neutral/negative",
-                "intensity": 0.7,
-                "message_type": "question",
-                "enthusiasm": "medium"
+                "emotion": "конкретна_емоція",
+                "intensity": число_від_0_до_1,
+                "message_type": "тип_повідомлення", 
+                "communication_style": "стиль_спілкування",
+                "response_need": "потреба_у_відповіді",
+                "respect_level": "рівень_поваги",
+                "requires_boundaries": true/false,
+                "can_be_playful": true/false
             }}
             """
             
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=100
+                temperature=0.2,  # Менша температура для більш стабільного аналізу
+                max_tokens=150
             )
             
             import json
             analysis = json.loads(response.choices[0].message.content)
-            logger.info(f"Аналіз емоцій: {analysis}")
+            
+            # Додаткова обробка для кращого логування
+            logger.info(f"🔍 [EMOTION_ANALYSIS] Повідомлення: '{messages_text[:50]}...'")
+            logger.info(f"🔍 [EMOTION_ANALYSIS] Емоція: {analysis.get('emotion')} (інтенсивність: {analysis.get('intensity')})")
+            logger.info(f"🔍 [EMOTION_ANALYSIS] Стиль: {analysis.get('communication_style')}, Повага: {analysis.get('respect_level')}")
+            logger.info(f"🔍 [EMOTION_ANALYSIS] Потребує границь: {analysis.get('requires_boundaries')}, Можна грати: {analysis.get('can_be_playful')}")
+            
             return analysis
             
         except Exception as e:
-            logger.error(f"Помилка аналізу емоцій: {e}")
+            logger.error(f"❌ [EMOTION_ANALYSIS] Помилка аналізу емоцій: {e}")
             return {
                 "emotion": "neutral",
                 "intensity": 0.5,
                 "message_type": "statement",
-                "enthusiasm": "medium"
+                "communication_style": "casual",
+                "response_need": "casual_chat",
+                "respect_level": "neutral",
+                "requires_boundaries": False,
+                "can_be_playful": True
             }
     
     def generate_stage_appropriate_questions(self, stage: str, covered_topics: List[str], user_context: Dict[str, Any]) -> List[str]:

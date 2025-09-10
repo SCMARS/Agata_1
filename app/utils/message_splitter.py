@@ -135,7 +135,54 @@ class MessageSplitter:
                 if current_part:
                     parts.append(' '.join(current_part))
         
-        return parts
+        # 🔥 НОВАЯ ЛОГИКА: естественное разделение
+        return self._natural_split(parts)
+    
+    def _natural_split(self, parts: List[str]) -> List[str]:
+        if not parts:
+            return parts
+            
+        # Объединяем все части в один текст
+        full_text = ' '.join(parts)
+        
+        # Если короткий текст - не разделяем
+        if len(full_text) <= 180:
+            return [full_text]
+        
+        # Ищем естественные места разрыва
+        import re
+        
+        # Лучшие места для разрыва (в порядке приоритета):
+        natural_breaks = [
+            (r'\.\s+([А-ЯA-Z])', 'sentence'),      # После предложения + заглавная
+            (r'\?\s+([А-ЯA-Z])', 'question'),      # После вопроса + заглавная  
+            (r'!\s+([А-ЯA-Z])', 'exclamation'),    # После восклицания + заглавная
+            (r'\s+(А|И|Но|Кстати|Да)\s+', 'conjunction'),  # Союзы
+            (r',\s+(а|и|но)\s+', 'small_conjunction'),     # Маленькие союзы
+        ]
+        
+        best_splits = []
+        for pattern, break_type in natural_breaks:
+            for match in re.finditer(pattern, full_text):
+                split_pos = match.start() if break_type == 'conjunction' else match.start(1)
+                best_splits.append((split_pos, break_type))
+        
+        if not best_splits:
+            return [full_text]
+        
+        # Находим разрыв ближе к середине
+        target = len(full_text) // 2
+        best_split = min(best_splits, key=lambda x: abs(x[0] - target))
+        
+        split_pos = best_split[0]
+        part1 = full_text[:split_pos].strip()
+        part2 = full_text[split_pos:].strip()
+        
+        # Проверяем минимальные длины (увеличиваем для естественности)
+        if len(part1) < 100 or len(part2) < 100:
+            return [full_text]
+            
+        return [part1, part2]
     
     def _merge_short_parts(self, parts: List[str], max_parts: int = None) -> List[str]:
         """Объединяет короткие части до достижения максимального количества"""

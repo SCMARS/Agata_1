@@ -1,8 +1,3 @@
-#!/usr/bin/env python3
-"""
-Комплексний тест системи Агати
-Перевіряє всі покращення згідно з ТЗ
-"""
 
 import requests
 import json

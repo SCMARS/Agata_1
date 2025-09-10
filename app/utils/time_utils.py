@@ -9,7 +9,6 @@ class TimeUtils:
         """Generate time-aware context string"""
         hour = current_time.hour
         
-        # Determine time of day
         if 6 <= hour < 12:
             time_of_day = "утро"
             greeting = "Доброе утро"

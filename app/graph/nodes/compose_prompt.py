@@ -530,6 +530,45 @@ class ComposePromptNode:
                 if not isinstance(next_theme_slot, dict):
                     next_theme_slot = {}
                 
+                # Отримуємо ПОВНИЙ текст стейджу та часові питання
+                current_stage_number = state.get("stage_number", 1)
+                stage_controller = state.get("stage_controller")
+
+                full_stage_text = ""
+                time_questions = ""
+                daily_schedule = ""
+                
+                # Визначаємо time_period незалежно від stage_controller
+                current_hour = datetime.now().hour
+                if 6 <= current_hour < 12:
+                    time_period = "morning"
+                elif 12 <= current_hour < 18:
+                    time_period = "day"
+                else:
+                    time_period = "evening"
+
+                if stage_controller:
+                    full_stage_text = stage_progress.get("full_stage_text", "")
+                    if not full_stage_text:
+                        full_stage_text = stage_controller._load_full_stage_content(current_stage_number)
+                    
+                    # Часові питання
+                    time_questions_dict = stage_controller.get_time_based_questions(current_stage_number)
+                    time_questions = "\n".join(time_questions_dict.get(time_period, []))
+                    
+                    # Розпорядок дня
+                    daily_schedule = stage_controller.get_daily_schedule_example(current_stage_number)
+                
+                logger.info(f"📚 [STAGE_FULL] Завантажено повний текст стейджу: {len(full_stage_text)} символів")
+                logger.info(f"⏰ [TIME_QUESTIONS] Питання для {time_period}: {len(time_questions)} символів")
+                logger.info(f"📅 [DAILY_SCHEDULE] Розпорядок дня: {len(daily_schedule)} символів")
+                
+                # 🔥 ЗБЕРІГАЄМО ВСІ ДАНІ В STATE ДЛЯ ПОВЕРНЕННЯ ЧЕРЕЗ API
+                state["full_stage_text"] = full_stage_text
+                state["time_questions"] = time_questions  
+                state["daily_schedule"] = daily_schedule
+                state["time_period"] = time_period
+                
                 # Сначала заменяем переменные в системном промпте
                 system_prompt_with_vars = dynamic_system_prompt
                 for var, value in {
@@ -548,7 +587,10 @@ class ComposePromptNode:
                     "absence_comment": absence_comment,
                     "response_structure_instructions": response_structure_instructions,
                     "stage_progress": stage_progress.get("stage_name", "Stage 1") if stage_progress else "Stage 1",
-                    "next_theme_slot": next_theme_slot.get("theme_name", "Знакомство") if next_theme_slot else "Знакомство"
+                    "next_theme_slot": next_theme_slot.get("theme_name", "Знакомство") if next_theme_slot else "Знакомство",
+                    "full_stage_text": full_stage_text,  # 🔥 ПОВНИЙ ТЕКСТ СТЕЙДЖУ
+                    "time_questions": time_questions,    # ⏰ ЧАСОВІ ПИТАННЯ
+                    "daily_schedule": daily_schedule     # 📅 РОЗПОРЯДОК ДНЯ
                 }.items():
                     system_prompt_with_vars = system_prompt_with_vars.replace(f"{{{var}}}", str(value))
                 
@@ -559,7 +601,25 @@ class ComposePromptNode:
                 ])
                 formatted_prompt = dynamic_template.format_messages(input_text=input_text)
                 logger.info(f"✅ Использован динамический системный промпт с памятью, временем и behavioral adaptation")
-                logger.info(f"🎭 BEHAVIORAL: Стратегия={behavioral_analysis.get('strategy_name', 'Unknown')}, Этап={behavioral_analysis.get('current_stage', 'Unknown')}")
+                logger.info(f"🎭 [BEHAVIORAL] Стратегия: {behavioral_analysis.get('strategy_name', 'Unknown')}")
+                logger.info(f"🎭 [BEHAVIORAL] Этап: {behavioral_analysis.get('current_stage', 'Unknown')}")
+                logger.info(f"🎭 [BEHAVIORAL] Эмоция: {behavioral_analysis.get('dominant_emotion', 'neutral')}")
+                logger.info(f"🎭 [BEHAVIORAL] Стиль общения: {behavioral_analysis.get('communication_style', 'balanced')}")
+                logger.info(f"🎭 [BEHAVIORAL] Уверенность: {behavioral_analysis.get('strategy_confidence', 0.0):.2f}")
+                
+                # Логируем время
+                logger.info(f"⏰ [TIME] Текущее время: {now_iso}")
+                logger.info(f"⏰ [TIME] День в системе: {day_number}")
+                logger.info(f"⏰ [TIME] Последнее сообщение: {last_diff_sec}с назад")
+                logger.info(f"⏰ [TIME] Приветствие: {time_greeting}")
+                logger.info(f"⏰ [TIME] Комментарий отсутствия: {absence_comment}")
+                logger.info(f"⏰ [TIME] Можно задать вопрос: {may_ask_question}")
+                
+                # Логируем прогресс стейджа
+                if stage_progress:
+                    logger.info(f"📈 [STAGE] Прогресс: {stage_progress}")
+                if next_theme_slot:
+                    logger.info(f"📈 [STAGE] Следующая тема: {next_theme_slot}")
                 
                 # Возвращаем результат
                 updated_state = {

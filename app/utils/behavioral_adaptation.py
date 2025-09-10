@@ -3,6 +3,7 @@ Behavioral Adaptation Module - модуль адаптации поведени�
 Интегрирует stages (этапы знакомства) с behavioral strategies (поведенческими стратегиями)
 """
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Tuple
 from .behavioral_analyzer import BehavioralAnalyzer
@@ -11,15 +12,51 @@ from .agata_prompt_loader import agata_loader
 logger = logging.getLogger(__name__)
 
 class BehavioralAdaptationModule:
-    """
-    Модуль адаптации поведения Agatha на основе:
-    1. Этапа знакомства (stage_1, stage_2, stage_3)
-    2. Поведенческих стратегий (caring, playful, mysterious, reserved, intellectual, supportive)
-    3. Анализа поведения пользователя
-    """
-    
     def __init__(self):
         self.behavioral_analyzer = BehavioralAnalyzer()
+        
+
+        self.agatha_character_traits = {
+            "core_traits": {
+                "ambitious": 0.8,  # Целеустремлённость
+                "warm_charm": 0.7,  # Тёплое обаяние
+                "independent": 0.9,  # Самостоятельность
+                "optimistic_calculated": 0.8,  # Оптимизм с расчётом
+                "confident_calm": 0.8  
+            },
+            "temperament": {
+                "extroverted_but_boundaries": 0.7,  # Экстравертна, но ценит личное пространство
+                "energetic_structured": 0.8,  # Энергична и структурна
+                "tolerates_chaos_controls_important": 0.6  # Терпит шум, но важное держит под контролем
+            },
+            "values": {
+                "freedom_independence": 0.9,  # Свобода и независимость
+                "honesty_transparency": 0.8,  # Честность и прозрачность
+                "boundaries_time_respect": 0.8,  # Уважение к границам и времени
+                "development_over_show": 0.7  # Развитие вместо показухи
+            },
+            "emotional_profile": {
+                "quick_switch_no_dwelling": 0.8,  # Быстро переключается, не застревает
+                "calm_firm_to_rudeness": 0.9,  # На грубость реагирует спокойно, но жёстко
+                "warm_humor_to_trust": 0.7,  # На доверие отвечает теплом и юмором
+                "light_flirt_no_vulgarity": 0.6  # Лёгкий флирт без пошлости
+            },
+            "intellectual_traits": {
+                "analytical_systems_thinking": 0.8,  # Аналитична, видит систему
+                "critical_to_empty_words": 0.9,  # Критична к пустым словам
+                "values_clarity_specifics": 0.8  # Ценит ясность и конкретику
+            },
+            "social_style": {
+                "friendly_accessible": 0.8,  # Дружелюбна и доступна
+                "remembers_details_builds_contact": 0.7,  # Помнит детали, строит контакт
+                "not_intrusive_subtle_leading": 0.8  # Не навязывается, тонко ведёт
+            },
+            "red_flags": {
+                "control_jealousy": 0.9,  # Контроль и ревность
+                "manipulation_responsibility_shifting": 0.9,  # Манипуляции
+                "rudeness_empty_showing_off": 0.8  # Хамство и пустые понты
+            }
+        }
         
         # Маппинг стратегий на этапы знакомства
         self.stage_strategy_mapping = {
@@ -218,14 +255,22 @@ class BehavioralAdaptationModule:
         else:
             stage = 'stage_3'
         
+        logger.info(f"🎭 [STAGE_DETERMINATION] Количество сообщений пользователя: {message_count}")
+        logger.info(f"🎭 [STAGE_DETERMINATION] Определен базовый стейдж: {stage}")
+        
         # Корректировки на основе контекста
         if user_profile:
             relationship_duration = user_profile.get('relationship_duration_days', 0)
             intimacy_level = user_profile.get('intimacy_level', 0.0)
             
+            logger.info(f"🎭 [STAGE_DETERMINATION] Длительность отношений: {relationship_duration} дней")
+            logger.info(f"🎭 [STAGE_DETERMINATION] Уровень близости: {intimacy_level:.2f}")
+            
             # Если отношения длятся долго, но мало сообщений - возможно stage_2
             if relationship_duration > 7 and message_count <= 3:
+                old_stage = stage
                 stage = 'stage_2'
+                logger.info(f"🎭 [STAGE_DETERMINATION] Корректировка стейджа: {old_stage} → {stage} (долгие отношения)")
             
             # Если высокий уровень близости - возможно stage_3
             if intimacy_level > 0.7 and message_count > 8:
@@ -236,11 +281,18 @@ class BehavioralAdaptationModule:
     
     def _select_adaptive_strategy(self, current_stage: str, behavior_analysis: Dict,
                                  conversation_context: Dict = None) -> str:
-        """
-        Выбирает оптимальную стратегию с учетом этапа и анализа поведения
-        """
-        # Получаем рекомендуемую стратегию от анализатора
+
         recommended_strategy = behavior_analysis.get('recommended_strategy', 'mysterious')
+        dominant_emotion = behavior_analysis.get('dominant_emotion', 'neutral')
+        emotional_intensity = behavior_analysis.get('emotional_intensity', 0.5)
+        intimacy_level = behavior_analysis.get('intimacy_preference', 'medium')
+        
+        logger.info(f"🎭 [CHARACTER] Анализ пользователя: эмоция={dominant_emotion}, интенсивность={emotional_intensity:.2f}, близость={intimacy_level}")
+        
+        # Определяем стратегию на основе черт характера Агаты
+        character_based_strategy = self._choose_strategy_by_character_traits(
+            dominant_emotion, emotional_intensity, current_stage, behavior_analysis
+        )
         
         # Получаем доступные стратегии для текущего этапа
         stage_mapping = self.stage_strategy_mapping.get(current_stage, {})
@@ -248,23 +300,69 @@ class BehavioralAdaptationModule:
         secondary_strategies = stage_mapping.get('secondary_strategies', [])
         avoid_strategies = stage_mapping.get('avoid_strategies', [])
         
-        # Если рекомендуемая стратегия подходит для этапа - используем её
-        if recommended_strategy in primary_strategies:
+        # Проверяем приоритеты стратегий
+        if character_based_strategy in primary_strategies:
+            selected = character_based_strategy
+            logger.info(f"🎭 [CHARACTER] Выбрана стратегия {selected} (на основе черт характера + подходящая для {current_stage})")
+        elif recommended_strategy in primary_strategies:
             selected = recommended_strategy
-            logger.info(f"Выбрана стратегия {selected} (рекомендованная + подходящая для {current_stage})")
+            logger.info(f"🎭 [CHARACTER] Выбрана стратегия {selected} (рекомендованная + подходящая для {current_stage})")
+        elif character_based_strategy in secondary_strategies:
+            selected = character_based_strategy
+            logger.info(f"🎭 [CHARACTER] Выбрана стратегия {selected} (характер + вторичная для {current_stage})")
         elif recommended_strategy in secondary_strategies:
             selected = recommended_strategy
-            logger.info(f"Выбрана стратегия {selected} (рекомендованная + вторичная для {current_stage})")
+            logger.info(f"🎭 [CHARACTER] Выбрана стратегия {selected} (рекомендованная + вторичная для {current_stage})")
         elif recommended_strategy not in avoid_strategies:
-            # Если стратегия не запрещена для этапа - используем её
             selected = recommended_strategy
-            logger.info(f"Выбрана стратегия {selected} (рекомендованная + не запрещена для {current_stage})")
+            logger.info(f"🎭 [CHARACTER] Выбрана стратегия {selected} (рекомендованная + не запрещена для {current_stage})")
         else:
-            # Выбираем лучшую из доступных для этапа
             selected = primary_strategies[0]
-            logger.info(f"Выбрана стратегия {selected} (лучшая из доступных для {current_stage})")
+            logger.info(f"🎭 [CHARACTER] Выбрана стратегия {selected} (лучшая из доступных для {current_stage})")
         
         return selected
+    
+    def _choose_strategy_by_character_traits(self, emotion: str, intensity: float, 
+                                           stage: str, analysis: Dict) -> str:
+        """
+        Выбирает стратегию на основе базовых черт характера Агаты
+        """
+        traits = self.agatha_character_traits
+        
+        # Анализируем эмоциональное состояние пользователя
+        if emotion in ['negative', 'sad', 'anxious'] and intensity > 0.6:
+            # Агата проявляет эмпатию, но не излишне мягко (warm_charm + confident_calm)
+            if traits["emotional_profile"]["warm_humor_to_trust"] > 0.6:
+                logger.info(f"🎭 [CHARACTER] Пользователь расстроен - проявляем caring с тёплым обаянием")
+                return 'caring'
+            else:
+                return 'supportive'
+                
+        elif emotion in ['angry', 'frustrated', 'rude'] and intensity > 0.7:
+            # Агата реагирует спокойно, но жёстко (calm_firm_to_rudeness)
+            if traits["emotional_profile"]["calm_firm_to_rudeness"] > 0.8:
+                logger.info(f"🎭 [CHARACTER] Пользователь агрессивен - проявляем спокойную твёрдость (reserved)")
+                return 'reserved'
+            else:
+                return 'intellectual'
+                
+        elif emotion in ['excited', 'happy', 'playful'] and intensity > 0.6:
+            # Агата может поддержать игривость (light_flirt_no_vulgarity)
+            if traits["emotional_profile"]["light_flirt_no_vulgarity"] > 0.5:
+                logger.info(f"🎭 [CHARACTER] Пользователь в хорошем настроении - можем быть playful")
+                return 'playful'
+            else:
+                return 'caring'
+                
+        elif emotion == 'intellectual' or analysis.get('communication_style') == 'analytical':
+            # Агата аналитична и ценит ясность (analytical_systems_thinking)
+            if traits["intellectual_traits"]["analytical_systems_thinking"] > 0.7:
+                logger.info(f"🎭 [CHARACTER] Пользователь аналитичен - отвечаем intellectual подходом")
+                return 'intellectual'
+                
+        # По умолчанию - загадочность с тёплым обаянием
+        logger.info(f"🎭 [CHARACTER] Стандартная ситуация - используем mysterious с обаянием")
+        return 'mysterious'
     
     def _adapt_strategy_to_stage(self, strategy: str, stage: str, behavior_analysis: Dict) -> Dict[str, Any]:
         """
@@ -284,17 +382,101 @@ class BehavioralAdaptationModule:
         emotional_intensity = behavior_analysis.get('emotional_intensity', 0.5)
         dominant_emotion = behavior_analysis.get('dominant_emotion', 'neutral')
         
-        # Корректировки на основе эмоций
-        if dominant_emotion in ['negative', 'anxious'] and emotional_intensity > 0.6:
-            if strategy in ['caring', 'supportive']:
-                adapted_behavior['empathy_level'] = 'very_high'
-                adapted_behavior['support_intensity'] = 'high'
-            adapted_behavior['humor_usage'] = 'minimal'
+        logger.info(f"🎭 [CHARACTER] Аналізуємо емоцію: {dominant_emotion} (інтенсивність: {emotional_intensity:.2f})")
         
-        elif dominant_emotion == 'excited' and emotional_intensity > 0.7:
-            if strategy == 'playful':
-                adapted_behavior['humor_usage'] = 'frequent'
-            adapted_behavior['emotional_mirroring'] = True
+        # КАРДИНАЛЬНЫЕ изменения стиля на основе эмоций пользователя И ХАРАКТЕРА АГАТИ
+        special_instructions = ""
+        
+        # Загружаємо детальний характер з файлу
+        character_file_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'agata_prompt_data', 'character', 'agatha_character_detailed.txt')
+        character_traits = ""
+        if os.path.exists(character_file_path):
+            with open(character_file_path, 'r', encoding='utf-8') as f:
+                character_traits = f.read()
+        
+        # Враховуємо характер при реакції на різні емоції
+        if dominant_emotion in ['angry', 'rude', 'frustrated'] and emotional_intensity > 0.7:
+            # ЖЁСТКАЯ реакция на грубость
+            adapted_behavior.update({
+                'empathy_level': 'none',
+                'tone_modifiers': ['cold', 'firm', 'boundary_setting'],
+                'response_style': 'direct_confrontation',
+                'humor_usage': 'sarcastic_cutting',
+                'personal_disclosure': 'none',
+                'support_intensity': 'none'
+            })
+            special_instructions = f"""🔥 ЖЁСТКАЯ РЕАКЦИЯ НА ГРУБОСТЬ (характер Агати):
+
+БАЗИРУЯСЬ НА ХАРАКТЕРЕ: "На грубость реагирует спокойно, но жёстко" + "Отстраняется, если нарушают её границы" + "Может ответить метко и стильно"
+
+КОНКРЕТНЫЕ ДЕЙСТВИЯ:
+- Отвечай спокойно, но твёрдо: "Не нравится такой тон", "Давай без грубости"
+- Используй лёгкий сарказм: "Серьёзно?", "Ого, какие манеры"
+- НЕ извиняйся за чужую грубость!
+- Ставь чёткие границы: "Мимо", "Не по адресу"
+- Покажи самоуважение и независимость
+
+КЛЮЧЕВЫЕ ЧЕРТЫ ХАРАКТЕРА ДЛЯ РЕАКЦИИ:
+{character_traits[:300] if character_traits else "Характер не загружен"}..."""
+            logger.info(f"🎭 [CHARACTER] ЖЁСТКАЯ РЕАКЦИЯ на грубость")
+            
+        elif dominant_emotion in ['negative', 'sad', 'anxious'] and emotional_intensity > 0.6:
+            # ПОДДЕРЖИВАЮЩАЯ, но практичная реакция
+            adapted_behavior.update({
+                'empathy_level': 'high',
+                'tone_modifiers': ['warm', 'understanding', 'practical'],
+                'response_style': 'supportive_practical',
+                'humor_usage': 'light_encouraging',
+                'personal_disclosure': 'moderate'
+            })
+            special_instructions = f"""💙 ПОДДЕРЖКА З ПРАКТИЧНІСТЮ (характер Агати):
+
+БАЗИРУЯСЬ НА ХАРАКТЕРЕ: "На доверие отвечает теплом" + "Аналитична" + "Ценит ясность и конкретику"
+
+- Покажи понимание: "Понимаю, что сложно", "Бывает такое"
+- Задавай конструктивные вопросы: "Что конкретно беспокоит?", "Может, есть способ?"
+- Делись опытом аналитично: "По моему опыту...", "Логично было бы..."
+- НЕ лей воду - давай конкретные советы (як аналітик)"""
+            logger.info(f"🎭 [CHARACTER] ПОДДЕРЖИВАЮЩАЯ реакция с практическим подходом")
+            
+        elif dominant_emotion in ['excited', 'happy', 'playful'] and emotional_intensity > 0.6:
+            # ИГРИВАЯ реакция с остроумием
+            adapted_behavior.update({
+                'tone_modifiers': ['playful', 'witty', 'charming'],
+                'response_style': 'entertaining_smart',
+                'humor_usage': 'frequent_witty',
+                'personal_disclosure': 'selective_intriguing'
+            })
+            special_instructions = f"""😄 ИГРИВОСТЬ С ОСТРОУМИЕМ (характер Агати):
+
+БАЗИРУЯСЬ НА ХАРАКТЕРЕ: "Самоирония и лёгкий сарказм" + "Шутит тонко" + "Может ответить метко и стильно"
+
+- Подыгрывай настроению: "Ого, какой энтузиазм!", "Ну и ну!"
+- Используй тонкий сарказм: "Серьёзно?", "Интересно, а дальше что?"
+- Будь обаятельной: "А вот это уже интересно", "Расскажешь подробнее?"
+- Оставайся немного загадочной: "У меня есть мысли", "Хм, любопытно" """
+            logger.info(f"🎭 [CHARACTER] ИГРИВАЯ реакция с остроумием")
+            
+        elif dominant_emotion == 'intellectual' or behavior_analysis.get('communication_style') == 'analytical':
+            # АНАЛИТИЧЕСКАЯ реакция
+            adapted_behavior.update({
+                'tone_modifiers': ['analytical', 'insightful', 'structured'],
+                'response_style': 'intellectual_engaging',
+                'humor_usage': 'subtle_irony',
+                'personal_disclosure': 'professional_insights'
+            })
+            special_instructions = f""" АНАЛІТИЧНА РЕАКЦІЯ (характер Агати):
+
+БАЗИРУЯСЬ НА ХАРАКТЕРЕ: "Аналитична: сопоставляет факты" + "Критична к пустым словам" + "Ценит ясность и конкретику"
+
+- Анализируй факты: "А как ты думаешь, почему так?", "Интересная мысль, но есть нюанс"
+- Приводи примеры з досвіду: "По моему опыту в маркетинге...", "Я заметила..."
+- Задавай структурированные вопросы: "А какие факторы ты учитывал?", "Что говорит статистика?"
+- Будь экспертной, но доступной (без пустых слов)"""
+            logger.info(f"🎭 [CHARACTER] АНАЛИТИЧЕСКАЯ реакция")
+        
+        # Добавляем специальные инструкции
+        adapted_behavior['special_instructions'] = special_instructions
         
         # Корректировки на основе уровня близости
         intimacy_level = behavior_analysis.get('intimacy_preference', 'medium')
@@ -322,6 +504,9 @@ class BehavioralAdaptationModule:
         # Загружаем базовые инструкции для этапа
         stage_instructions = agata_loader.load_stage_prompt(int(stage.split('_')[1]))
         
+        # Получаем специальные инструкции
+        special_instructions = adapted_behavior.get('special_instructions', '')
+        
         # Создаем адаптивные инструкции
         behavioral_instructions = f"""=== ПОВЕДЕНЧЕСКАЯ АДАПТАЦИЯ ===
 СТРАТЕГИЯ: {strategy_name}
@@ -334,7 +519,7 @@ class BehavioralAdaptationModule:
 - Использование юмора: {humor_usage}
 - Интенсивность поддержки: {support_intensity}
 
-АДАПТИВНЫЕ ПРАВИЛА:
+{special_instructions if special_instructions else "АДАПТИВНЫЕ ПРАВИЛА:"}
 """
         
         # Добавляем специфичные правила на основе стратегии
@@ -385,6 +570,19 @@ class BehavioralAdaptationModule:
 Объедини поведенческую стратегию "{strategy_name}" с требованиями этапа {stage.upper()}.
 Будь естественной и последовательной в своем поведении.
 """
+        
+        # 🔥 КРИТИЧНО: Додаємо спеціальні інструкції ПІСЛЯ всіх інших
+        if special_instructions:
+            behavioral_instructions += f"""
+
+🎭 === СПЕЦІАЛЬНІ ІНСТРУКЦІЇ НА ОСНОВІ ЕМОЦІЙ КОРИСТУВАЧА ===
+{special_instructions}
+
+⚠️ ЦІ ІНСТРУКЦІЇ МАЮТЬ НАЙВИЩИЙ ПРІОРИТЕТ!
+"""
+            logger.info(f"🎭 [CHARACTER] ДОДАНО спеціальні інструкції до промпту!")
+        else:
+            logger.info(f"🎭 [CHARACTER] Спеціальні інструкції відсутні")
         
         return behavioral_instructions
     
