@@ -11,23 +11,41 @@ from .living_chat_config_loader import living_chat_config
 logger = logging.getLogger(__name__)
 
 class StageController:
-    """Контроллер стейджей общения с явным контролем и логами"""
+
+    _instance = None
+    _initialized = False
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(StageController, cls).__new__(cls)
+        return cls._instance
     
     def __init__(self):
-        self.config = living_chat_config
-        self.stage_rules = self._load_stage_rules()
-        self.user_stages = {}  
-        self.user_question_counts = {}  
-        self.user_last_activity = {}
-        self.stage_files_cache = {}  # stage_number -> full_text
-        logger.info("🎯 [STAGE] StageController ініціалізовано з кешем файлів")
+        if not self._initialized:
+            self.config = living_chat_config
+            self.stage_rules = self._load_stage_rules()
+            self.user_stages = {}  
+            self.user_question_counts = {}  
+            self.user_last_activity = {}
+            self.stage_files_cache = {}  
+            self.user_completed_slots = {}  
+            self.user_asked_questions = {}  
+            logger.info("🎯 [STAGE] StageController ініціалізовано з кешем файлів та трекингом прогресу")
+            StageController._initialized = True
         
     def _load_full_stage_content(self, stage_number: int) -> str:
         """Завантажує ПОВНИЙ текст стейджу з файлу для використання в промпті"""
+        logger.info(f"🔍 [STAGE-{stage_number}] _load_full_stage_content вызван")
+        logger.info(f"🔍 [STAGE-{stage_number}] Кеш содержит ключи: {list(self.stage_files_cache.keys())}")
+        
         if stage_number in self.stage_files_cache:
-            return self.stage_files_cache[stage_number]
+            cached_content = self.stage_files_cache[stage_number]
+            logger.info(f"📚 [STAGE-{stage_number}] Используем кешированный контент ({len(cached_content)} символов)")
+            return cached_content
             
         stage_file_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'stages 2', f'stage_{stage_number}.txt')
+        logger.info(f"🔍 [STAGE-{stage_number}] Путь к файлу: {stage_file_path}")
+        logger.info(f"🔍 [STAGE-{stage_number}] Файл существует: {os.path.exists(stage_file_path)}")
         
         if os.path.exists(stage_file_path):
             try:
@@ -59,16 +77,20 @@ class StageController:
         
         logger.info(f"🔍 [STAGE-{stage_number}] Ищу временные вопросы в стейдже...")
         
-        # Ищем секцию "Вопросы по времени суток:"
-        time_section_match = re.search(r'Вопросы по времени суток:\s*\n(.*?)(?=\n\n|\n[А-Я]|\Z)', content, re.DOTALL)
-        if time_section_match:
-            time_text = time_section_match.group(1)
-            logger.info(f"🔍 [STAGE-{stage_number}] Найдена секция временных вопросов: {repr(time_text[:100])}")
-            
-            # Парсим строки вида "Утро: «...», «...»"
-            for line in time_text.split('\n'):
-                line = line.strip()
-                if ':' in line and '«' in line:
+        # Ищем все строки с временными вопросами после "Вопросы по времени суток:"
+        lines = content.split('\n')
+        in_time_section = False
+        
+        for line in lines:
+            line = line.strip()
+            if 'Вопросы по времени суток:' in line:
+                in_time_section = True
+                continue
+            elif in_time_section:
+                if line == '' or (line and line[0].isupper() and len(line) > 10):
+                    # Конец секции - пустая строка или новая секция
+                    break
+                elif ':' in line and '«' in line:
                     time_period = line.split(':')[0].strip().lower()
                     questions_text = line.split(':', 1)[1]
                     
@@ -80,8 +102,9 @@ class StageController:
                     if questions:
                         time_questions[time_period] = questions
                         logger.info(f"⏰ [STAGE-{stage_number}] {time_period}: {questions}")
-        else:
-            logger.warning(f"⚠️ [STAGE-{stage_number}] Секция 'Вопросы по времени суток:' НЕ найдена!")
+        
+        if not time_questions:
+            logger.warning(f"⚠️ [STAGE-{stage_number}] Временные вопросы НЕ найдены!")
         
         logger.info(f"⏰ [STAGE-{stage_number}] Итого временных вопросов: {time_questions}")
         return time_questions
@@ -94,8 +117,8 @@ class StageController:
         
         # Ищем секцию "Повседневность" (может быть "Повседневность\n" или "Распорядок дня")
         patterns = [
-            r'Повседневность.*?\n((?:\d{2}:\d{2}.*?\n?)+)',
-            r'Распорядок дня.*?\n((?:\d{2}:\d{2}.*?\n?)+)',
+            r'Повседневность\s*\n((?:\d{2}:\d{2}[^\n]*\n?)+)',
+            r'Распорядок дня\s*\n((?:\d{2}:\d{2}[^\n]*\n?)+)',
         ]
         
         for pattern in patterns:
@@ -260,36 +283,26 @@ class StageController:
         }
     
     def get_user_stage(self, user_id: str, message_count: int) -> int:
-
+        """
+        Простой счетчик сообщений пользователя для определения стейджа
+        """
         current_time = datetime.now().strftime("%H:%M:%S")
         
-        if user_id not in self.user_stages:
-            self.user_stages[user_id] = 1
-            logger.info(f"🎯 [{current_time}] [STAGE] Пользователь {user_id} начал стейдж 1 (Знакомство)")
-        
-        # Логика перехода между стейджами (исправлена согласно требованиям)
-        if message_count <= 5:
+        # Простая логика: до 6 сообщений = Stage 1, с 7 сообщений = Stage 2
+        if message_count < 7:
             stage = 1
             stage_name = "Знакомство"
-        elif message_count <= 15:
+        elif message_count < 16:
             stage = 2  
             stage_name = "Дружба/флирт"
         else:
             stage = 3
             stage_name = "Вброс"
             
-        if self.user_stages[user_id] != stage:
-            old_stage = self.user_stages[user_id]
-            old_stage_names = {1: "Знакомство", 2: "Дружба/флирт", 3: "Вброс"}
-            old_stage_name = old_stage_names.get(old_stage, f"Стейдж {old_stage}")
-            
-            self.user_stages[user_id] = stage
-            logger.info(f"🔄 [{current_time}] [STAGE] Пользователь {user_id}:")
-            logger.info(f"   📊 Сообщений: {message_count}")
-            logger.info(f"   ⬆️  Переход: {old_stage_name} → {stage_name}")
-            logger.info(f"   🎯 Новый стейдж: {stage} ({stage_name})")
-        else:
-            logger.info(f"📍 [{current_time}] [STAGE] Пользователь {user_id}: стейдж {stage} ({stage_name}), сообщений: {message_count}")
+        logger.info(f"🎯 [STAGE] Пользователь {user_id}: {message_count} сообщений → Stage {stage} ({stage_name})")
+        
+        # Сохраняем текущий стейдж
+        self.user_stages[user_id] = stage
         
         return stage
     
@@ -404,13 +417,6 @@ class StageController:
         
         return True
     
-    def mark_question_asked(self, user_id: str):
-        """Отмечает, что вопрос был задан"""
-        if user_id not in self.user_question_counts:
-            self.user_question_counts[user_id] = 0
-        self.user_question_counts[user_id] += 1
-        
-        logger.info(f"[STAGE] Пользователю {user_id} задан вопрос #{self.user_question_counts[user_id]}")
     
     def get_stage_progress(self, user_id: str, stage_number: int) -> Dict[str, Any]:
         """Получает прогресс по текущему стейджу"""
@@ -445,37 +451,120 @@ class StageController:
         return progress
     
     def get_next_theme_and_slot(self, user_id: str, stage_number: int) -> Optional[Dict[str, Any]]:
-        """Определяет следующую тему и слот для вопроса"""
+        """Определяет следующую тему и слот для вопроса с учетом завершенных"""
         stage_rules = self.stage_rules.get(stage_number, {})
         themes = stage_rules.get("themes", {})
         
-        # Ищем темы с незакрытыми слотами
-        uncompleted_themes = []
-        for theme_name, theme_data in themes.items():
-            if not theme_data.get("completed", False):
-                uncompleted_themes.append({
-                    "theme_name": theme_name,
-                    "slots": theme_data.get("slots", []),
-                    "uncompleted_slots": len(theme_data.get("slots", []))
-                })
+        # Получаем завершенные слоты пользователя
+        user_completed = self.user_completed_slots.get(user_id, {})
         
-        if not uncompleted_themes:
+        # 🔍 ДОБАВЛЯЕМ ОТЛАДКУ
+        logger.info(f"🔍 [DEBUG_THEME_SELECTION] {user_id}: Завершенные слоты: {user_completed}")
+        logger.info(f"🔍 [DEBUG_THEME_SELECTION] {user_id}: Текущий стейдж: {stage_number}")
+        logger.info(f"🔍 [DEBUG_THEME_SELECTION] {user_id}: Доступные темы: {list(themes.keys())}")
+        
+        # 🔥 ИСПРАВЛЕНИЕ: Проверяем незавершенные темы из ПРЕДЫДУЩИХ стейджей
+        all_uncompleted_themes = []
+        
+        # Сначала проверяем темы из предыдущих стейджей
+        for prev_stage in range(1, stage_number):
+            prev_rules = self.stage_rules.get(prev_stage, {})
+            prev_themes = prev_rules.get("themes", {})
+            
+            for theme_name, theme_data in prev_themes.items():
+                all_slots = theme_data.get("slots", [])
+                completed_slots = user_completed.get(theme_name, [])
+                remaining_slots = [slot for slot in all_slots if slot not in completed_slots]
+                
+                if remaining_slots:
+                    all_uncompleted_themes.append({
+                        "theme_name": theme_name,
+                        "slots": remaining_slots,
+                        "uncompleted_slots": len(remaining_slots),
+                        "next_slot": remaining_slots[0],
+                        "stage": prev_stage
+                    })
+                    logger.info(f"📋 [PREV_STAGE] {user_id}: '{theme_name}' из стейджа {prev_stage} - осталось {len(remaining_slots)} слотов: {remaining_slots}")
+        
+        # Затем добавляем темы из текущего стейджа
+        for theme_name, theme_data in themes.items():
+            all_slots = theme_data.get("slots", [])
+            completed_slots = user_completed.get(theme_name, [])
+            remaining_slots = [slot for slot in all_slots if slot not in completed_slots]
+            
+            if remaining_slots:
+                all_uncompleted_themes.append({
+                    "theme_name": theme_name,
+                    "slots": remaining_slots,
+                    "uncompleted_slots": len(remaining_slots),
+                    "next_slot": remaining_slots[0],
+                    "stage": stage_number
+                })
+                logger.info(f"📋 [CURRENT_STAGE] {user_id}: '{theme_name}' - осталось {len(remaining_slots)} слотов: {remaining_slots}")
+        
+        if not all_uncompleted_themes:
+            logger.info(f"🏁 [ALL_COMPLETED] {user_id}: Все темы завершены для всех стейджей")
             return None
         
-        # Приоритизируем темы с наибольшим числом незакрытых слотов
-        next_theme = max(uncompleted_themes, key=lambda x: x["uncompleted_slots"])
+        # ПРИОРИТЕТ: выбираем темы по порядку (Знакомство → Жительство → Работа → Хобби → Личное/Флирт)
+        theme_order = ["Знакомство", "Жительство", "Работа", "Хобби", "Личное/Флирт"]
+        
+        # Сначала проверяем темы из предыдущих стейджей
+        prev_stage_themes = [t for t in all_uncompleted_themes if t["stage"] < stage_number]
+        if prev_stage_themes:
+            # Выбираем первую незавершенную тему по порядку из предыдущих стейджей
+            for theme_name in theme_order:
+                theme = next((t for t in prev_stage_themes if t["theme_name"] == theme_name), None)
+                if theme:
+                    next_theme = theme
+                    logger.info(f"🎯 [PRIORITY] Выбираем тему '{next_theme['theme_name']}' из стейджа {next_theme['stage']} (по порядку)")
+                    break
+        else:
+            # Если все предыдущие стейджи завершены, берем из текущего по порядку
+            for theme_name in theme_order:
+                theme = next((t for t in all_uncompleted_themes if t["theme_name"] == theme_name), None)
+                if theme:
+                    next_theme = theme
+                    logger.info(f"🎯 [PRIORITY] Выбираем тему '{next_theme['theme_name']}' (по порядку)")
+                    break
+        
+        logger.info(f"🎯 [NEXT_THEME] {user_id}: Выбрана тема '{next_theme['theme_name']}', следующий слот: '{next_theme['next_slot']}'")
         
         return {
             "theme_name": next_theme["theme_name"],
-            "next_slot": next_theme["slots"][0] if next_theme["slots"] else None,
+            "next_slot": next_theme["next_slot"],
             "remaining_slots": next_theme["uncompleted_slots"]
         }
     
     def mark_slot_completed(self, user_id: str, stage_number: int, theme_name: str, slot: str):
-        """Отмечает слот как завершенный"""
-        # Здесь можно добавить логику для отслеживания завершенных слотов
-        # Пока просто логируем
-        logger.info(f"[STAGE] Пользователь {user_id} завершил слот '{slot}' в теме '{theme_name}' (этап {stage_number})")
+        """Отмечает слот как завершенный и сохраняет прогресс"""
+        if user_id not in self.user_completed_slots:
+            self.user_completed_slots[user_id] = {}
+        
+        if theme_name not in self.user_completed_slots[user_id]:
+            self.user_completed_slots[user_id][theme_name] = []
+        
+        if slot not in self.user_completed_slots[user_id][theme_name]:
+            self.user_completed_slots[user_id][theme_name].append(slot)
+            logger.info(f"✅ [SLOT_COMPLETED] {user_id}: '{slot}' в теме '{theme_name}' (этап {stage_number})")
+        else:
+            logger.info(f"⚠️ [SLOT_ALREADY_COMPLETED] {user_id}: '{slot}' уже завершен в теме '{theme_name}'")
+    
+    def mark_question_asked(self, user_id: str, question: str):
+        """Отмечает вопрос как заданный"""
+        if user_id not in self.user_asked_questions:
+            self.user_asked_questions[user_id] = []
+        
+        if question not in self.user_asked_questions[user_id]:
+            self.user_asked_questions[user_id].append(question)
+            logger.info(f"❓ [QUESTION_ASKED] {user_id}: '{question}'")
+        else:
+            logger.info(f"⚠️ [QUESTION_REPEATED] {user_id}: '{question}' уже был задан")
+    
+    def is_question_already_asked(self, user_id: str, question: str) -> bool:
+        """Проверяет, был ли вопрос уже задан"""
+        asked_questions = self.user_asked_questions.get(user_id, [])
+        return question in asked_questions
     
     def get_time_based_questions(self, stage_number: int) -> Dict[str, List[str]]:
         """Повертає питання базовані на часі доби для поточного стейджу"""
@@ -488,21 +577,12 @@ class StageController:
         # Парсим временные вопросы из стейджа
         stage_time_questions = self._parse_time_questions_from_stage(stage_content, stage_number)
         
-        # Fallback значения если в стейдже нет временных вопросов
-        default_questions = {
-            "утро": ["Как спалось?", "Что планируешь сегодня?", "Завтракал?"],
-            "день": ["Как проходит день?", "Что ел на обед?", "Много дел?"], 
-            "вечер": ["Какие планы на вечер?", "Во сколько примерно ложишься спать?"]
-        }
-        
-        # Используем временные вопросы из стейджа или fallback
-        result_questions = stage_time_questions if stage_time_questions else default_questions
-        
-        logger.info(f"⏰ [{current_time}] [STAGE-{stage_number}] Загружено {len(result_questions)} групп временных вопросов:")
-        for period, questions in result_questions.items():
+        logger.info(f"⏰ [{current_time}] [STAGE-{stage_number}] stage_time_questions: {stage_time_questions}")
+        logger.info(f"⏰ [{current_time}] [STAGE-{stage_number}] Загружено {len(stage_time_questions)} групп временных вопросов:")
+        for period, questions in stage_time_questions.items():
             logger.info(f"   📅 {period}: {len(questions)} вопросов - {questions[:2]}...")
         
-        return result_questions
+        return stage_time_questions
     
     def get_daily_schedule_example(self, stage_number: int) -> str:
         """Повертає приклад розпорядку дня для стейджу"""

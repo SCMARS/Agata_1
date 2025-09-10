@@ -16,6 +16,7 @@ from ..utils.prompt_composer import PromptComposer
 from ..utils.message_splitter import message_splitter
 from ..utils.question_controller import question_controller
 from ..utils.question_filter import question_filter
+from ..utils.stage_controller import stage_controller
 from ..memory.memory_adapter import MemoryAdapter
 from ..graph.nodes.compose_prompt import ComposePromptNode
 from ..utils.stage_controller import StageController
@@ -33,6 +34,8 @@ class PipelineState(TypedDict):
     normalized_input: str
     memory_context: str
     day_prompt: str
+    stage_prompt: str
+    stage_number: int
     behavior_prompt: str
     final_prompt: str
     llm_response: str
@@ -145,11 +148,13 @@ class AgathaPipeline:
             # ПОЛУЧАЕМ stage_number ИЗ stage_controller, а НЕ пересчитываем
             stage_controller = StageController()
             total_message_count = len(state.get("messages", []))
-            stage_number = stage_controller.get_user_stage(state.get("user_id", "unknown"), total_message_count)
+            user_messages = [msg for msg in state.get("messages", []) if msg.get("role") == "user"]
+            user_message_count = len(user_messages)
+            stage_number = stage_controller.get_user_stage(state.get("user_id", "unknown"), user_message_count)
             state["stage_number"] = stage_number
             state["stage_prompt"] = self.prompt_loader.get_stage_prompt(stage_number)
             
-            log_info(f"🔧 [FALLBACK] Установлен stage_number: {stage_number} для {total_message_count} сообщений")
+            log_info(f"🔧 [FALLBACK] Установлен stage_number: {stage_number} для {user_message_count} сообщений пользователя")
             log_info(f"Ensured stage {stage_number} data in state")
 
     async def process_chat(self, user_id: str, messages: List[Dict], meta_time: Optional[str] = None) -> Dict[str, Any]:
@@ -163,6 +168,7 @@ class AgathaPipeline:
             "memory_context": "",
             "day_prompt": "",
             "stage_prompt": "",
+            "stage_number": 1,  # Инициализируем с дефолтным значением
             "behavior_prompt": "",
             "final_prompt": "",
             "llm_response": "",
@@ -200,6 +206,69 @@ class AgathaPipeline:
             result = await self.graph.ainvoke(state)
             log_info(f"✅ LangGraph Pipeline COMPLETED: {result}")
             
+            # 🎯 ОТЛАДКА: Проверяем что _postprocess выполнился
+            print(f"🔍 [DEBUG_MAIN] Pipeline completed, проверяем отслеживание...")
+            if "llm_response" in result:
+                response_text = result["llm_response"]
+                has_question = "?" in response_text
+                print(f"🔍 [DEBUG_MAIN] LLM ответ: '{response_text[:100]}...'")
+                print(f"🔍 [DEBUG_MAIN] Содержит вопрос: {has_question}")
+                print(f"🔍 [DEBUG_MAIN] next_theme_slot: {result.get('next_theme_slot', {})}")
+                
+                # 🎯 FALLBACK ЛОГИКА ОТСЛЕЖИВАНИЯ
+                if has_question and result.get("next_theme_slot", {}):
+                    print(f"🔍 [DEBUG_MAIN] Добавляем fallback отслеживание...")
+                    
+                    # Извлекаем вопрос из ответа
+                    question_match = re.search(r'([^.!?]*\?)', response_text)
+                    if question_match:
+                        asked_question = question_match.group(1).strip() + "?"
+                        print(f"✅ [FALLBACK] Найден вопрос: '{asked_question}'")
+                        stage_controller.mark_question_asked(user_id, asked_question)
+                        
+                        # Отмечаем слот как завершенный
+                        next_theme_slot = result.get("next_theme_slot", {})
+                        if "theme_name" in next_theme_slot and "next_slot" in next_theme_slot:
+                            theme_name = next_theme_slot["theme_name"]
+                            slot = next_theme_slot["next_slot"]
+                            current_stage = result.get("stage_number", 1)
+                            stage_controller.mark_slot_completed(user_id, current_stage, theme_name, slot)
+                            print(f"✅ [FALLBACK] Слот '{slot}' в теме '{theme_name}' отмечен как завершенный")
+                    else:
+                        print(f"⚠️ [FALLBACK] Не удалось извлечь вопрос из: '{response_text}'")
+                else:
+                    print(f"🔍 [DEBUG_MAIN] Нет условий для отслеживания: has_question={has_question}, next_theme_slot={result.get('next_theme_slot', {})}")
+                
+                # 🎯 НОВАЯ ЛОГИКА: Отслеживание ответов пользователя на вопросы
+                # Проверяем, отвечает ли пользователь на заданный ранее вопрос
+                user_messages = [msg for msg in state.get("messages", []) if msg.get("role") == "user"]
+                if len(user_messages) >= 2:  # Есть минимум 2 сообщения пользователя
+                    last_user_message = user_messages[-1]["content"].lower()
+                    print(f"🔍 [ANSWER_TRACKING] Последнее сообщение пользователя: '{last_user_message}'")
+                    
+                    # Проверяем, есть ли активный вопрос, на который пользователь мог ответить
+                    next_theme_slot = result.get("next_theme_slot", {})
+                    if next_theme_slot and "next_slot" in next_theme_slot:
+                        current_question = next_theme_slot["next_slot"].lower()
+                        print(f"🔍 [ANSWER_TRACKING] Текущий вопрос: '{current_question}'")
+                        
+                        # Простая эвристика: если пользователь дал развернутый ответ (больше 10 символов)
+                        # и это не просто "да", "нет", "ок" - считаем что ответил на вопрос
+                        if len(last_user_message) > 10 and not any(word in last_user_message for word in ["да", "нет", "ок", "ага", "угу"]):
+                            print(f"✅ [ANSWER_TRACKING] Пользователь дал развернутый ответ на вопрос '{current_question}'")
+                            
+                            # Отмечаем слот как завершенный
+                            theme_name = next_theme_slot["theme_name"]
+                            slot = next_theme_slot["next_slot"]
+                            current_stage = result.get("stage_number", 1)
+                            stage_controller.mark_slot_completed(user_id, current_stage, theme_name, slot)
+                            print(f"✅ [ANSWER_TRACKING] Слот '{slot}' в теме '{theme_name}' отмечен как завершенный!")
+            
+            # Логируем финальный state перед API response
+            log_info(f"🔍 [API_RESPONSE] stage_number в state: {state.get('stage_number')}")
+            log_info(f"🔍 [API_RESPONSE] stage_number в result: {result.get('stage_number')}")
+            log_info(f"🔍 [API_RESPONSE] stage_progress в result: {result.get('stage_progress', {}).get('stage_name', 'unknown')}")
+            
             # Возвращаем ПОЛНЫЙ результат с behavioral analysis и данными стейджа
             return {
                 "parts": result["processed_response"].get("parts", []),
@@ -207,15 +276,15 @@ class AgathaPipeline:
                 "delays_ms": result["processed_response"].get("delays_ms", []),
                 "behavioral_analysis": result.get("behavioral_analysis", {}),
                 "current_strategy": result.get("current_strategy", "unknown"),
-                "stage_number": state.get("stage_number", 1),
+                "stage_number": result.get("stage_number", 1),
                 "day_number": result.get("day_number", 1),
                 # 🔥 ДОДАЄМО ВСІ ДАНІ СТЕЙДЖУ ДЛЯ TELEGRAM БОТА
                 "stage_progress": result.get("stage_progress", {}),
                 "next_theme_slot": result.get("next_theme_slot", {}),
                 "response_structure_instructions": result.get("response_structure_instructions", ""),
                 "full_stage_text": result.get("full_stage_text", "") or result.get("stage_progress", {}).get("full_stage_text", ""),
-                "time_questions": state.get("time_questions", ""),
-                "daily_schedule": state.get("daily_schedule", ""),
+                "time_questions": result.get("time_questions", ""),
+                "daily_schedule": result.get("daily_schedule", ""),
                 "time_period": result.get("time_period", "evening"),
                 "memory_stats": {
                     "short_memory": len(str(result.get("memory_context", ""))),
@@ -266,8 +335,9 @@ class AgathaPipeline:
         log_info(f"   📧 Сообщений всего: {total_message_count}")
         log_info(f"   👥 Сообщений пользователя: {user_message_count}")
         log_info(f"   💬 Текущий ввод: {state['normalized_input'][:50]}...")
+        log_info(f"🔍 [DEBUG] user_messages: {[msg.get('content', '')[:20] for msg in user_messages]}")
         
-        current_stage = stage_controller.get_user_stage(state["user_id"], total_message_count)
+        current_stage = stage_controller.get_user_stage(state["user_id"], user_message_count)
         log_info(f"🔍 [DEBUG] get_user_stage вернул: {current_stage} (тип: {type(current_stage)})")
         state["stage_number"] = current_stage
         log_info(f"🔍 [DEBUG] Установлен stage_number в state: {state['stage_number']}")
@@ -313,7 +383,7 @@ class AgathaPipeline:
             log_info(f"⚠️ [PIPELINE] stage_number не установлен! Используем fallback логику.")
             stage_controller = StageController()
             total_message_count = len(state.get("messages", []))
-            stage_number = stage_controller.get_user_stage(state.get("user_id", "unknown"), total_message_count)
+            stage_number = stage_controller.get_user_stage(state.get("user_id", "unknown"), user_message_count)
             state["stage_number"] = stage_number
         stage_prompt = self.prompt_loader.get_stage_prompt(stage_number)
         state["stage_prompt"] = stage_prompt
@@ -336,7 +406,7 @@ class AgathaPipeline:
             # В качестве fallback используем значение из StageController
             stage_controller = StageController()
             total_message_count = len(state.get("messages", []))
-            stage_number = stage_controller.get_user_stage(state.get("user_id", "unknown"), total_message_count)
+            stage_number = stage_controller.get_user_stage(state.get("user_id", "unknown"), user_message_count)
             state["stage_number"] = stage_number
             log_info(f"📋 [FALLBACK] Установлен fallback stage_number: {stage_number}")
         
@@ -444,7 +514,7 @@ class AgathaPipeline:
             # В качестве fallback используем значение из StageController
             stage_controller = StageController()
             total_message_count = len(state.get("messages", []))
-            stage_number = stage_controller.get_user_stage(state.get("user_id", "unknown"), total_message_count)
+            stage_number = stage_controller.get_user_stage(state.get("user_id", "unknown"), user_message_count)
             state["stage_number"] = stage_number
             log_info(f"📋 [FALLBACK] Установлен fallback stage_number: {stage_number}")
         
@@ -511,12 +581,19 @@ class AgathaPipeline:
 
         # Анализируем поведение пользователя
         log_info(f"🎭 Starting Behavioral Analysis for {user_id}...")
+        log_info(f"🎭 Messages count: {len(state['messages'])}")
+        log_info(f"🎭 User messages: {[msg.get('content', '')[:50] for msg in state['messages'] if msg.get('role') == 'user']}")
+        
         try:
+            log_info(f"🎭 Behavioral analyzer: {self.behavioral_analyzer}")
+            log_info(f"🎭 Dynamic generator: {getattr(self.behavioral_analyzer, 'dynamic_generator', 'None')}")
+            
             behavioral_analysis = self.behavioral_analyzer.analyze_user_behavior(
                 messages=state["messages"],
                 user_profile=user_profile,
                 conversation_context=conversation_context
             )
+            log_info(f"🎭 Behavioral analysis completed: {behavioral_analysis}")
 
             # Выбираем стратегию на основе анализа
             recommended_strategy = behavioral_analysis['recommended_strategy']
@@ -862,6 +939,32 @@ class AgathaPipeline:
         
         # Получаем профиль пользователя для контекста
         user_id = state["user_id"]
+        
+        # 🎯 ОТСЛЕЖИВАНИЕ ЗАДАННЫХ ВОПРОСОВ
+        log_info(f"🔍 [DEBUG_TRACKING] has_question_after: {has_question_after}, response_text: '{response_text[:50]}...'")
+        if has_question_after:
+            # Извлекаем вопрос из ответа для отслеживания
+            question_match = re.search(r'([^.!?]*\?)', response_text)
+            log_info(f"🔍 [DEBUG_TRACKING] question_match: {question_match.group(1) if question_match else None}")
+            if question_match:
+                asked_question = question_match.group(1).strip() + "?"
+                log_info(f"🔍 [DEBUG_TRACKING] asked_question: '{asked_question}'")
+                stage_controller.mark_question_asked(user_id, asked_question)
+                
+                # Определяем завершенный слот на основе next_theme_slot
+                next_theme_slot = state.get("next_theme_slot", {})
+                log_info(f"🔍 [DEBUG_TRACKING] next_theme_slot: {next_theme_slot}")
+                if next_theme_slot and "theme_name" in next_theme_slot and "next_slot" in next_theme_slot:
+                    theme_name = next_theme_slot["theme_name"]
+                    slot = next_theme_slot["next_slot"]
+                    current_stage = state.get("stage_number", 1)
+                    log_info(f"🔍 [DEBUG_TRACKING] Отмечаем слот '{slot}' в теме '{theme_name}' как завершенный")
+                    stage_controller.mark_slot_completed(user_id, current_stage, theme_name, slot)
+                    log_info(f"✅ [SLOT_TRACKING] Завершен слот '{slot}' в теме '{theme_name}' для пользователя {user_id}")
+                else:
+                    log_info(f"⚠️ [DEBUG_TRACKING] next_theme_slot неполный: {next_theme_slot}")
+        else:
+            log_info(f"⚠️ [DEBUG_TRACKING] Вопрос не обнаружен в ответе")
         memory = self._get_memory(user_id)
 
         # Получаем или создаем MessageController для пользователя

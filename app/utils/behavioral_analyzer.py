@@ -1,6 +1,4 @@
-"""
-Behavioral Analyzer - модуль анализа поведения пользователя для выбора стратегий
-"""
+
 import re
 import os
 import logging
@@ -44,21 +42,34 @@ class BehavioralAnalyzer:
                 'behavioral_adjustments': Dict[str, Any]
             }
         """
+        logger.info(f"🔍 [BEHAVIORAL_ANALYSIS] Начинаем анализ поведения...")
+        logger.info(f"🔍 [BEHAVIORAL_ANALYSIS] Всего сообщений: {len(messages)}")
+        print(f"🔍 [BEHAVIORAL_ANALYSIS] Начинаем анализ поведения...")
+        print(f"🔍 [BEHAVIORAL_ANALYSIS] Всего сообщений: {len(messages)}")
+        
         if not messages:
+            logger.warning("🔍 [BEHAVIORAL_ANALYSIS] Нет сообщений, возвращаем дефолтный анализ")
             return self._get_default_analysis()
         
         # Фильтруем только сообщения пользователя
         user_messages = [msg for msg in messages if msg.get('role') == 'user']
+        logger.info(f"🔍 [BEHAVIORAL_ANALYSIS] Сообщений пользователя: {len(user_messages)}")
         
         if not user_messages:
+            logger.warning("🔍 [BEHAVIORAL_ANALYSIS] Нет сообщений пользователя, возвращаем дефолтный анализ")
             return self._get_default_analysis()
         
         # Анализируем последние сообщения (более свежие важнее)
         recent_messages = user_messages[-5:]  # Последние 5 сообщений
         all_content = ' '.join([msg.get('content', '') for msg in recent_messages])
         
+        logger.info(f"🔍 [BEHAVIORAL_ANALYSIS] Анализируем контент: '{all_content[:100]}...'")
+        
         # 1. Анализ эмоций
+        logger.info(f"🔍 [BEHAVIORAL_ANALYSIS] Начинаем анализ эмоций...")
         emotion_analysis = self._analyze_emotions(all_content, recent_messages)
+        logger.info(f"🔍 [BEHAVIORAL_ANALYSIS] Результат анализа эмоций: {emotion_analysis}")
+        print(f"🔍 [BEHAVIORAL_ANALYSIS] Результат анализа эмоций: {emotion_analysis}")
         
         # 2. Анализ тем
         topic_analysis = self._analyze_topics(all_content)
@@ -96,14 +107,20 @@ class BehavioralAnalyzer:
     def _analyze_emotions(self, content: str, messages: List[Dict]) -> Dict[str, Any]:
         """ДИНАМІЧНИЙ аналіз емоційного стану через OpenAI API"""
         
+        logger.info(f"🔍 [EMOTION_ANALYSIS] Начинаем анализ эмоций...")
+        logger.info(f"🔍 [EMOTION_ANALYSIS] dynamic_generator доступен: {self.dynamic_generator is not None}")
+        
         # Якщо є покращений генератор - використовуємо його
         if self.dynamic_generator:
             try:
                 # Формуємо список контенту для аналізу
                 message_contents = [msg.get('content', '') for msg in messages[-3:]]  # Останні 3 повідомлення
+                logger.info(f"🔍 [EMOTION_ANALYSIS] Анализируем сообщения: {message_contents}")
                 
                 # Викликаємо покращений аналіз емоцій
+                logger.info(f"🔍 [EMOTION_ANALYSIS] Вызываем OpenAI анализ...")
                 openai_analysis = self.dynamic_generator.analyze_message_emotions(message_contents)
+                logger.info(f"🔍 [EMOTION_ANALYSIS] OpenAI анализ завершен: {openai_analysis}")
                 
                 # Мапимо результат на наш формат
                 emotion_mapping = {
@@ -115,13 +132,16 @@ class BehavioralAnalyzer:
                     'angry': 'angry',
                     'frustrated': 'angry',
                     'anxious': 'anxious',
-                    'playful': 'excited',
+                    'playful': 'playful',
                     'intellectual': 'intellectual',
-                    'rude': 'angry'
+                    'rude': 'rude'  # Оставляем rude как есть
                 }
                 
                 dominant_emotion = emotion_mapping.get(openai_analysis.get('emotion', 'neutral'), 'neutral')
                 intensity = float(openai_analysis.get('intensity', 0.5))
+                
+                print(f"🔍 [EMOTION_AI] OpenAI вернул: {openai_analysis}")
+                print(f"🔍 [EMOTION_AI] Маппинг: {openai_analysis.get('emotion', 'neutral')} -> {dominant_emotion}")
                 
                 # Обчислюємо стабільність
                 stability = self._calculate_emotional_stability(messages)
@@ -143,6 +163,9 @@ class BehavioralAnalyzer:
         
         # FALLBACK: простий аналіз без хардкоду
         logger.warning("🔍 [EMOTION_FALLBACK] Використовуємо спрощений аналіз")
+        logger.warning(f"🔍 [EMOTION_FALLBACK] Анализируем контент: '{content}'")
+        print(f"🔍 [EMOTION_FALLBACK] Використовуємо спрощений аналіз")
+        print(f"🔍 [EMOTION_FALLBACK] Анализируем контент: '{content}'")
         
         # Простий аналіз тону без хардкоду
         content_lower = content.lower()
@@ -157,27 +180,35 @@ class BehavioralAnalyzer:
             dominant_emotion = 'rude'  # Конкретно grубость, не просто angry
             intensity = 0.9  # Високий рівень
             logger.info(f"🔍 [EMOTION_FALLBACK] Виявлено ГРУБІСТЬ: {[w for w in rude_words if w in content_lower]}")
+            print(f"🔍 [EMOTION_FALLBACK] Виявлено ГРУБІСТЬ: {[w for w in rude_words if w in content_lower]}")
         elif any(word in content_lower for word in positive_words):
             dominant_emotion = 'positive' 
             intensity = 0.6
+            print(f"🔍 [EMOTION_FALLBACK] Виявлено ПОЗИТИВ: {[w for w in positive_words if w in content_lower]}")
         elif any(word in content_lower for word in negative_words):
             dominant_emotion = 'negative'
             intensity = 0.7
+            print(f"🔍 [EMOTION_FALLBACK] Виявлено НЕГАТИВ: {[w for w in negative_words if w in content_lower]}")
         elif any(word in content_lower for word in excited_words):
             dominant_emotion = 'excited'
             intensity = 0.7
+            print(f"🔍 [EMOTION_FALLBACK] Виявлено ВОЗБУЖДЕНИЕ: {[w for w in excited_words if w in content_lower]}")
         else:
             dominant_emotion = 'neutral'
             intensity = 0.4
+            print(f"🔍 [EMOTION_FALLBACK] НЕ НАЙДЕНО КЛЮЧЕВЫХ СЛОВ - NEUTRAL")
         
         stability = 0.5  # Середня стабільність для fallback
         
-        return {
+        result = {
             'dominant_emotion': dominant_emotion,
             'intensity': intensity,
             'stability': stability,
             'analysis_method': 'fallback_simple'
         }
+        
+        logger.warning(f"🔍 [EMOTION_FALLBACK] Результат анализа: {result}")
+        return result
     
     def _analyze_topics(self, content: str) -> Dict[str, Any]:
         """ДИНАМІЧНИЙ аналіз тем через OpenAI API"""
@@ -239,16 +270,6 @@ class BehavioralAnalyzer:
             'focus_level': 'diverse',
             'analysis_method': 'fallback_simple'
         }
-        
-        # Определяем уровень фокуса на темах
-        total_score = sum(topic_scores.values())
-        focus_level = 'focused' if len(primary_topics) <= 2 and total_score > 3 else 'diverse'
-        
-        return {
-            'primary_topics': primary_topics,
-            'topic_scores': topic_scores,
-            'focus_level': focus_level
-        }
     
     def _analyze_communication_style(self, messages: List[Dict]) -> Dict[str, Any]:
         """Анализ стиля коммуникации"""
@@ -258,8 +279,16 @@ class BehavioralAnalyzer:
         all_content = ' '.join([msg.get('content', '') for msg in messages])
         
         # Анализ паттернов
+        communication_patterns = {
+            'question_heavy': r'\?',
+            'exclamation_heavy': r'!',
+            'storytelling': r'(расскажу|история|случилось|было)',
+            'sharing_emotions': r'(чувствую|эмоции|настроение|переживаю)',
+            'seeking_advice': r'(совет|помоги|что делать|как быть)'
+        }
+        
         pattern_matches = {}
-        for pattern_name, pattern in self.communication_patterns.items():
+        for pattern_name, pattern in communication_patterns.items():
             matches = len(re.findall(pattern, all_content, re.IGNORECASE))
             pattern_matches[pattern_name] = matches
         
@@ -384,6 +413,18 @@ class BehavioralAnalyzer:
             strategy_scores['reserved'] += 2.0
             strategy_scores['supportive'] += 1.5
         
+        elif dominant_emotion == 'rude':
+            strategy_scores['reserved'] += 3.0  # Максимальная защита от грубости
+            strategy_scores['supportive'] += 1.0
+        
+        elif dominant_emotion == 'intellectual':
+            strategy_scores['intellectual'] += 2.5
+            strategy_scores['mysterious'] += 1.5
+        
+        elif dominant_emotion == 'playful':
+            strategy_scores['playful'] += 2.5
+            strategy_scores['caring'] += 1.0
+        
         else:  # neutral
             strategy_scores['mysterious'] += 1.5
             strategy_scores['playful'] += 1.0
@@ -449,6 +490,9 @@ class BehavioralAnalyzer:
         # Выбираем лучшую стратегию
         best_strategy = max(strategy_scores, key=strategy_scores.get)
         confidence = strategy_scores[best_strategy] / max(sum(strategy_scores.values()), 1.0)
+        
+        print(f"🎯 [STRATEGY_CHOICE] Баллы стратегий: {strategy_scores}")
+        print(f"🎯 [STRATEGY_CHOICE] Выбрана стратегия: {best_strategy} (confidence: {confidence:.2f})")
         
         # Создаем поведенческие корректировки
         adjustments = self._create_behavioral_adjustments(
@@ -571,16 +615,15 @@ class BehavioralAnalyzer:
         
         emotions = []
         for msg in messages[-5:]:  # Последние 5 сообщений
-            content = msg.get('content', '').lower()
-            msg_emotion = 'neutral'
-            
-            for emotion, patterns in self.emotion_patterns.items():
-                score = 0
-                for keyword in patterns['keywords']:
-                    score += content.count(keyword)
-                if score > 0:
-                    msg_emotion = emotion
-                    break
+            content = msg.get('content', '')
+            if self.dynamic_generator and content.strip():
+                try:
+                    analysis = self.dynamic_generator.analyze_message_emotions([content])
+                    msg_emotion = analysis.get('emotion', 'neutral')
+                except:
+                    msg_emotion = 'neutral'
+            else:
+                msg_emotion = 'neutral'
             
             emotions.append(msg_emotion)
         
