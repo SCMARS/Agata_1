@@ -45,7 +45,7 @@ async def test_pipeline_stage_calculation(monkeypatch):
         state = await pipeline._ingest_input(state)  # type: ignore
         return state
 
-    # 1-5 -> stage 1
+    # 1-10 -> stage 1
     s1 = await run_case(1)
     assert s1["stage_number"] == 1
     assert s1["day_number"] == 2
@@ -54,15 +54,21 @@ async def test_pipeline_stage_calculation(monkeypatch):
     s2 = await run_case(5)
     assert s2["stage_number"] == 1
 
-    # 6-15 -> stage 2
-    s3 = await run_case(6)
-    assert s3["stage_number"] == 2
+    s3 = await run_case(10)
+    assert s3["stage_number"] == 1
 
-    s4 = await run_case(15)
+    # 11-21 -> stage 2
+    s4 = await run_case(11)
     assert s4["stage_number"] == 2
 
-    # 16+ -> stage 3
-    s5 = await run_case(16)
-    assert s5["stage_number"] == 3
+    s5 = await run_case(15)
+    assert s5["stage_number"] == 2
+
+    s6 = await run_case(21)
+    assert s6["stage_number"] == 2
+
+    # 22+ -> stage 3
+    s7 = await run_case(22)
+    assert s7["stage_number"] == 3
 
 

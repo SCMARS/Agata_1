@@ -33,10 +33,11 @@ class QuestionController:
         if user_id not in self.user_counters:
             self.user_counters[user_id] = 0
             
+        # НЕ увеличиваем счетчик здесь - он увеличивается в increment_counter
         current_count = self.user_counters[user_id]
         
-        # Избегаем вопросов, если недавно задавали (не каждое сообщение)
-        should_avoid = (current_count % self.max_frequency) != (self.max_frequency - 1)
+        # Разрешаем вопросы каждое 3-е сообщение (счетчик 3, 6, 9, 12...)
+        should_avoid = (current_count % self.max_frequency) != 0
         
         logger.info(f"Вопросы для {user_id}: счетчик {current_count}, избегать={should_avoid}")
         return should_avoid

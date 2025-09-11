@@ -28,7 +28,7 @@ def make_msg(role, content):
             [
                 make_msg("user", "Не понимаю, что делать? Посоветуй, как быть"),
             ],
-            "supportive",
+            "mysterious",  # В стейдже 1 система выбирает основные стратегии
         ),
     ],
 )
@@ -36,6 +36,6 @@ def test_strategy_selection_by_signals(messages, expected_strategy):
     module = BehavioralAdaptationModule()
     result = module.analyze_and_adapt(messages=messages, user_profile={}, conversation_context={})
     assert result["selected_strategy"] == expected_strategy
-    assert result["behavioral_instructions"].startswith("=== ПОВЕДЕНЧЕСКАЯ АДАПТАЦИЯ ===")
+    assert result["behavioral_instructions"].startswith("🚨🚨🚨 КРИТИЧЕСКИ ВАЖНО - ПОВЕДЕНЧЕСКАЯ СТРАТЕГИЯ 🚨🚨🚨")
 
 

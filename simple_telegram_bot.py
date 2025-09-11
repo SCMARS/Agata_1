@@ -33,6 +33,9 @@ class SimpleTelegramBot:
         self.api_base_url = os.getenv("API_BASE_URL", "http://localhost:8000")
         self.application = Application.builder().token(self.token).build()
         
+
+        self.user_conversations = {}
+        
         # Добавляем обработчики
         self.application.add_handler(CommandHandler("start", self.start_command))
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
@@ -57,19 +60,30 @@ class SimpleTelegramBot:
         logger.info(f"Message from {user_id}: {message_text}")
         
         try:
-            # Отправляем в API
+            # Инициализируем историю сообщений для пользователя, если её нет
+            if user_id not in self.user_conversations:
+                self.user_conversations[user_id] = []
+            
+            # Добавляем сообщение пользователя в историю
+            self.user_conversations[user_id].append({"role": "user", "content": message_text})
+            
+            # Отправляем всю историю сообщений в API
             async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
                 response = await client.post(
                     f"{self.api_base_url}/api/chat",
                     json={
                         "user_id": str(user_id),
-                        "messages": [{"role": "user", "content": message_text}]
+                        "messages": self.user_conversations[user_id]
                     }
                 )
             
             if response.status_code == 200:
                 chat_response = response.json()
                 response_text = chat_response.get("response", "Нет ответа")
+                
+                # Добавляем ответ бота в историю
+                self.user_conversations[user_id].append({"role": "assistant", "content": response_text})
+                
                 await update.message.reply_text(response_text)
                 logger.info(f"Sent response to {user_id}: {response_text[:50]}...")
             else:

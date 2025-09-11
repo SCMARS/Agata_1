@@ -342,6 +342,14 @@ class AgathaPipeline:
         log_info(f"   📧 Сообщений всего: {total_message_count}")
         log_info(f"   👥 Сообщений пользователя: {user_message_count}")
         log_info(f"   💬 Текущий ввод: {state['normalized_input'][:50]}...")
+        
+        if state["normalized_input"]:
+            stage_number = stage_controller.get_user_stage(state["user_id"], user_message_count)
+            stage_controller.analyze_user_response_and_close_slots(
+                state["user_id"], 
+                state["normalized_input"], 
+                stage_number
+            )
         log_info(f"🔍 [DEBUG] user_messages: {[msg.get('content', '')[:20] for msg in user_messages]}")
         
         current_stage = stage_controller.get_user_stage(state["user_id"], user_message_count)
@@ -390,6 +398,8 @@ class AgathaPipeline:
             log_info(f"⚠️ [PIPELINE] stage_number не установлен! Используем fallback логику.")
             stage_controller = StageController()
             total_message_count = len(state.get("messages", []))
+            user_messages = [msg for msg in state.get("messages", []) if msg.get("role") == "user"]
+            user_message_count = len(user_messages)
             stage_number = stage_controller.get_user_stage(state.get("user_id", "unknown"), user_message_count)
             state["stage_number"] = stage_number
         stage_prompt = self.prompt_loader.get_stage_prompt(stage_number)
@@ -413,6 +423,8 @@ class AgathaPipeline:
             # В качестве fallback используем значение из StageController
             stage_controller = StageController()
             total_message_count = len(state.get("messages", []))
+            user_messages = [msg for msg in state.get("messages", []) if msg.get("role") == "user"]
+            user_message_count = len(user_messages)
             stage_number = stage_controller.get_user_stage(state.get("user_id", "unknown"), user_message_count)
             state["stage_number"] = stage_number
             log_info(f"📋 [FALLBACK] Установлен fallback stage_number: {stage_number}")
@@ -521,6 +533,8 @@ class AgathaPipeline:
             # В качестве fallback используем значение из StageController
             stage_controller = StageController()
             total_message_count = len(state.get("messages", []))
+            user_messages = [msg for msg in state.get("messages", []) if msg.get("role") == "user"]
+            user_message_count = len(user_messages)
             stage_number = stage_controller.get_user_stage(state.get("user_id", "unknown"), user_message_count)
             state["stage_number"] = stage_number
             log_info(f"📋 [FALLBACK] Установлен fallback stage_number: {stage_number}")
@@ -1083,9 +1097,6 @@ class AgathaPipeline:
         if "has_question_after_filter" in state:
             processed["has_question"] = state["has_question_after_filter"]
             log_info(f"🚫 [FILTER] Обновлен has_question: {state['has_question_after_filter']}")
-        
-        # Обновляем счетчик вопросов
-        question_controller.increment_counter(user_id)
         
         state["processed_response"] = processed
         
