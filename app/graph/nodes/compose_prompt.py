@@ -557,8 +557,8 @@ class ComposePromptNode:
                 user_messages = [msg for msg in state.get("messages", []) if msg.get("role") == "user"]
                 user_msg_count = len(user_messages)
                 
-                # ИСПРАВЛЕНИЕ: не добавляем к user_msg_count, так как normalized_input уже учтен
-                behavioral_analysis["is_first_contact"] = (user_msg_count <= 1)
+                # ИСПРАВЛЕНИЕ: is_first_contact только для самого первого сообщения
+                behavioral_analysis["is_first_contact"] = (user_msg_count == 1)
                 behavioral_instructions = self._create_behavioral_instructions(behavioral_analysis)
                 enhanced_memory_context_with_behavior = f"{enhanced_memory_context}\n\n{behavioral_instructions}"
                 
@@ -826,6 +826,10 @@ class ComposePromptNode:
             instructions.append("Запрещены восклицания, эмодзи, тёплые формулы приветствия. Примеры: 'Привет' / 'Ну привет' / 'Окей'.")
             # Возвращаем сразу, чтобы правила были жёсткими в первый ход
             return "\n".join(instructions)
+        
+        # ДЛЯ ВСЕХ ОСТАЛЬНЫХ СООБЩЕНИЙ: НЕ НАЧИНАЙ С ПРИВЕТСТВИЙ
+        instructions.append("НЕ НАЧИНАЙ сообщения со слов 'Привет', 'Добрый день', 'Здравствуй' и т.п.")
+        instructions.append("Отвечай сразу по существу, как в обычном разговоре.")
         
         # Добавляем детали из анализа
         tone_modifiers = adapted_behavior.get("tone_modifiers", [])
