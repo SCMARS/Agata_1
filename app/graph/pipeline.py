@@ -335,6 +335,17 @@ class AgathaPipeline:
         # Определяем стейдж общения (считаем ВСЕ сообщения в диалоге)
         total_message_count = len(state.get("messages", []))
         user_message_count = len(user_messages)
+        
+        # 🔥 ИСПРАВЛЕНИЕ: Используем реальное количество сообщений пользователя
+        # Система уже правильно считает user_messages, используем это значение
+        log_info(f"🔄 [STAGE_FIX] Реальные сообщения пользователя: {user_message_count}")
+        
+        # Если есть объединенные сообщения в normalized_input, это не влияет на подсчет стейджей
+        if state.get("normalized_input") and "і" in state["normalized_input"]:
+            combined_parts = state["normalized_input"].split("і")
+            non_empty_parts = [part.strip() for part in combined_parts if part.strip()]
+            log_info(f"🔄 [STAGE_FIX] Объединенные в normalized_input: {len(non_empty_parts)} частей")
+        
         current_time = datetime.now().strftime("%H:%M:%S")
         
         log_info(f"🔄 [{current_time}] [PIPELINE] === ОПРЕДЕЛЕНИЕ СТЕЙДЖА ===")
