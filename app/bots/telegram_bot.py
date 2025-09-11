@@ -409,7 +409,7 @@ class ProductionTelegramBot:
                 # Ошибка API
                 self.logger.error(f"❌ Chat API вернул ошибку: {response.status_code}")
                 from telegram import Bot
-                bot = Bot(token=self.config.bot_token)
+                bot = Bot(token=self.config.token)
                 await bot.send_message(
                     chat_id=chat_id,
                     text="😔 Извини, что-то пошло не так. Попробуй еще раз."
@@ -469,23 +469,38 @@ class ProductionTelegramBot:
         await self.application.bot.set_my_commands(commands)
         self.logger.info(f"Bot commands set: {[cmd.command for cmd in commands]}")
         
-        # Запускаем polling
-        await self.application.run_polling(drop_pending_updates=True)
+        # Сбрасываем возможный webhook перед polling, чтобы избежать 409 Conflict
+        try:
+            await self.application.bot.delete_webhook(drop_pending_updates=True)
+            self.logger.info("Webhook deleted (drop_pending_updates=True)")
+        except Exception as e:
+            self.logger.warning(f"Failed to delete webhook before polling: {e}")
+        
+        # Запускаем polling напрямую через updater без управления event loop
+        await self.application.initialize()
+        await self.application.start()
+        await self.application.updater.start_polling(drop_pending_updates=True)
+        
+        try:
+            # Держим бота активным
+            while True:
+                await asyncio.sleep(1)
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            self.logger.info("Bot polling interrupted")
+        finally:
+            await self.application.updater.stop()
+            await self.application.stop()
+            await self.application.shutdown()
     
     def run(self):
         """Синхронный запуск бота"""
         try:
-            # Используем nest_asyncio для работы с уже запущенным event loop
-            import nest_asyncio
-            nest_asyncio.apply()
-            
-            # Проверяем, есть ли уже запущенный loop
+            # Проверяем, есть ли уже запущенный event loop
             try:
                 loop = asyncio.get_running_loop()
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, self.start())
-                    future.result()
+                # Если есть, создаем задачу в существующем loop
+                task = loop.create_task(self.start())
+                loop.run_until_complete(task)
             except RuntimeError:
                 # Если нет запущенного loop, создаем новый
                 asyncio.run(self.start())

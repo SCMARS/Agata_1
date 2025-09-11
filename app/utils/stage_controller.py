@@ -139,7 +139,11 @@ class StageController:
                 "description": "При знакомстве не ждешь инициативы от собеседника, а сама проявляешь инициативу",
                 "themes": {
                     "Знакомство": {
-                        "slots": ["Общее приветствие", "Причина написать", "Первое впечатление"],
+                        "slots": [
+                            "Как тебя зовут?",
+                            "Сколько тебе лет?", 
+                            "Что привело тебя сюда?"
+                        ],
                         "completed": False
                     },
                     "Жительство": {
@@ -175,9 +179,9 @@ class StageController:
                     },
                     "Личное/Флирт": {
                         "slots": [
-                            "Легкие комплименты",
-                            "Касание к общим интересам",
-                            "Проявление заинтересованности"
+                            "У тебя есть девушка?",
+                            "Что для тебя важно в отношениях?",
+                            "Как относишься к сюрпризам?"
                         ],
                         "completed": False
                     }
@@ -245,28 +249,28 @@ class StageController:
                 "themes": {
                     "Повседневность": {
                         "slots": [
-                            "Распорядок дня",
-                            "Рабочие дела",
-                            "Тренировки и здоровье",
-                            "Вечерние планы"
+                            "Как спалось?",
+                            "Что планируешь сегодня?",
+                            "Как проходит день?",
+                            "Какие планы на вечер?"
                         ],
                         "completed": False
                     },
                     "Трейдинг": {
                         "slots": [
-                            "Упоминание сделки (+300$)",
-                            "Объяснение про ПУ аналитика",
-                            "Рассказ о доходах",
-                            "Мягкое предложение попробовать"
+                            "Кстати, сегодня удачно торгнула (+300$)",
+                            "Ты знаком с трейдингом?",
+                            "У меня есть аналитик, который помогает",
+                            "Хочешь попробовать с минималки?"
                         ],
                         "completed": False
                     },
                     "Романтика": {
                         "slots": [
-                            "Касания о совместности",
-                            "Намеки на близость",
-                            "Флирт и комплименты",
-                            "Создание интимности"
+                            "С тобой так приятно общаться",
+                            "Жаль, что не рядом",
+                            "Представляла, как мы гуляем вместе",
+                            "Хочется обнять тебя"
                         ],
                         "completed": False
                     }
@@ -285,20 +289,34 @@ class StageController:
     def get_user_stage(self, user_id: str, message_count: int) -> int:
         """
         Простой счетчик сообщений пользователя для определения стейджа
+        Теперь учитывает завершение всех слотов стейджа: если все слоты стейджа закрыты, продвигаем стейдж
         """
         current_time = datetime.now().strftime("%H:%M:%S")
         
-        # Простая логика: до 6 сообщений = Stage 1, с 7 сообщений = Stage 2
-        if message_count < 7:
+        # Базовая логика порогов по количеству сообщений (user-only)
+        if message_count < 11: 
             stage = 1
             stage_name = "Знакомство"
-        elif message_count < 16:
+        elif message_count < 22:  # Стейдж 2: 11-21
             stage = 2  
             stage_name = "Дружба/флирт"
-        else:
+        else:  # Стейдж 3: 22+
             stage = 3
             stage_name = "Вброс"
-            
+        
+
+        try:
+
+            if stage == 1 and self.are_all_slots_completed(user_id, 1) and message_count >= 2:
+                stage = 2
+                stage_name = "Дружба/флирт"
+            # Если текущий получился 2, а слоты стейджа 2 закрыты — перевести в 3
+            if stage == 2 and self.are_all_slots_completed(user_id, 2):
+                stage = 3
+                stage_name = "Вброс"
+        except Exception as _:
+            pass
+        
         logger.info(f"🎯 [STAGE] Пользователь {user_id}: {message_count} сообщений → Stage {stage} ({stage_name})")
         
         # Сохраняем текущий стейдж
@@ -306,46 +324,78 @@ class StageController:
         
         return stage
     
-    def should_ask_question(self, user_id: str, stage: int, last_question_time: Optional[datetime] = None) -> bool:
-        """Определяет, нужно ли задать вопрос на текущем стейдже"""
-        rules = self.stage_rules.get(stage, {})
-        question_interval = rules.get("question_interval_seconds", 30)
+    def are_all_slots_completed(self, user_id: str, stage_number: int) -> bool:
+        """Проверяет, закрыты ли все слоты заданного стейджа для пользователя"""
+        stage_rules = self.stage_rules.get(stage_number, {})
+        themes = stage_rules.get("themes", {})
+        user_completed = self.user_completed_slots.get(user_id, {})
         
-        # Проверяем интервал между вопросами
-        if last_question_time:
-            time_since_last = datetime.now() - last_question_time
-            if time_since_last.total_seconds() < question_interval:
-                logger.info(f"⏰ [STAGE] Слишком рано для вопроса (прошло {time_since_last.total_seconds():.1f}с)")
-                return False
+        for theme_name, theme_data in themes.items():
+            required_slots = theme_data.get("slots", [])
+            completed_slots = user_completed.get(theme_name, []) or []
+            # Если есть хотя бы один незакрытый — возвращаем False
+            for slot in required_slots:
+                if slot not in completed_slots:
+                    return False
+        return True
+    
+    def should_ask_question(self, user_id: str, stage_number: int) -> bool:
+        """Определяет, нужно ли задать вопрос сейчас (учёт лимитов и интервала)"""
+        stage_rules = self.stage_rules.get(stage_number, {})
+        max_questions_per_session = stage_rules.get("max_questions_per_session", 1)
+        question_interval = stage_rules.get("question_interval_seconds", 60)
         
-        # Проверяем лимит вопросов
-        question_count = self.user_question_counts.get(user_id, 0)
-        max_questions = rules.get("max_questions", 3)
-        
-        if question_count >= max_questions:
-            logger.info(f"❌ [STAGE] Достигнут лимит вопросов для стейджа {stage} ({question_count}/{max_questions})")
+        current_questions = self.user_question_counts.get(user_id, 0)
+        if current_questions >= max_questions_per_session:
+            logger.info(f"❌ [STAGE] Достигнут лимит вопросов для стадии {stage_number} ({current_questions}/{max_questions_per_session})")
             return False
         
-        logger.info(f"✅ [STAGE] Можно задать вопрос (стейдж {stage}, вопросов {question_count}/{max_questions})")
+        last_activity = self.user_last_activity.get(user_id)
+        if last_activity:
+            time_since_last = (datetime.now() - last_activity).total_seconds()
+            if time_since_last < question_interval:
+                logger.info(f"⏰ [STAGE] Рано для нового вопроса: прошло {time_since_last:.1f}с < {question_interval}s")
+                return False
+        
         return True
     
     def get_stage_question(self, user_id: str, stage: int) -> str:
-        """Получает подходящий вопрос для стейджа"""
-        rules = self.stage_rules.get(stage, {})
-        required_questions = rules.get("required_questions", [])
+        """Возвращает следующий вопрос по текущему стейджу, избегая повторов"""
+        # Попытаемся выбрать следующий слот по темам
+        next_theme = self.get_next_theme_and_slot(user_id, stage)
+        candidate = None
+        if next_theme:
+            candidate = next_theme.get("next_slot")
+            # Добавим знак вопроса, если его нет
+            if candidate and not candidate.strip().endswith("?"):
+                candidate = candidate.strip() + "?"
         
-        # Увеличиваем счетчик вопросов
-        if user_id not in self.user_question_counts:
-            self.user_question_counts[user_id] = 0
-        self.user_question_counts[user_id] += 1
+        # Если нет тем/слотов — fallback к required_questions или дефолту
+        if not candidate:
+            rules = self.stage_rules.get(stage, {})
+            required_questions = rules.get("required_questions", [])
+            if required_questions:
+                candidate = required_questions[0]
+            else:
+                candidate = "Как ты?"
         
-        # Выбираем вопрос
-        if required_questions:
-            question = required_questions[0]  # Берем первый из списка
-            logger.info(f"❓ [STAGE] Выбран вопрос для стейджа {stage}: '{question}'")
-            return question
+        # Избежание повторов
+        if self.is_question_already_asked(user_id, candidate):
+            logger.info(f"⚠️ [STAGE] Кандидат вопрос уже задавался: '{candidate}' — ищем альтернативу")
+            # Попытаемся взять следующий незавершенный слот, если доступен
+            next_theme_alt = self.get_next_theme_and_slot(user_id, stage)
+            if next_theme_alt and next_theme_alt.get("next_slot") != candidate:
+                alt = next_theme_alt.get("next_slot")
+                if alt and not alt.strip().endswith("?"):
+                    alt = alt.strip() + "?"
+                candidate = alt or candidate
         
-        return "как дела?"
+        # Увеличиваем счетчик и помечаем как заданный
+        self.user_question_counts[user_id] = self.user_question_counts.get(user_id, 0) + 1
+        self.mark_question_asked(user_id, candidate)
+        
+        logger.info(f"❓ [STAGE] Выбран вопрос для стейджа {stage}: '{candidate}'")
+        return candidate
     
     def get_stage_instructions(self, stage: int) -> str:
         """Получает инструкции для стейджа"""
@@ -506,27 +556,49 @@ class StageController:
             logger.info(f"🏁 [ALL_COMPLETED] {user_id}: Все темы завершены для всех стейджей")
             return None
         
-        # ПРИОРИТЕТ: выбираем темы по порядку (Знакомство → Жительство → Работа → Хобби → Личное/Флирт)
-        theme_order = ["Знакомство", "Жительство", "Работа", "Хобби", "Личное/Флирт"]
-        
-        # Сначала проверяем темы из предыдущих стейджей
-        prev_stage_themes = [t for t in all_uncompleted_themes if t["stage"] < stage_number]
-        if prev_stage_themes:
-            # Выбираем первую незавершенную тему по порядку из предыдущих стейджей
-            for theme_name in theme_order:
-                theme = next((t for t in prev_stage_themes if t["theme_name"] == theme_name), None)
-                if theme:
-                    next_theme = theme
-                    logger.info(f"🎯 [PRIORITY] Выбираем тему '{next_theme['theme_name']}' из стейджа {next_theme['stage']} (по порядку)")
-                    break
+
+        # 🔄 НОВАЯ ЛОГИКА РОТАЦИИ: ЧЕРЕДУЕМ ТЕМЫ ПО КРУГУ
+        # Определяем порядок ротации в зависимости от стейджа
+        if stage_number == 1:
+            theme_rotation_order = ["Жительство", "Работа", "Хобби", "Знакомство", "Личное/Флирт"]  # Личное/Флирт в конце
+        elif stage_number == 2:
+            theme_rotation_order = ["Цели/мечты", "Автомобиль", "Семья", "Флирт"]
+        elif stage_number == 3:
+            theme_rotation_order = ["Повседневность", "Трейдинг", "Романтика"]
         else:
-            # Если все предыдущие стейджи завершены, берем из текущего по порядку
-            for theme_name in theme_order:
-                theme = next((t for t in all_uncompleted_themes if t["theme_name"] == theme_name), None)
-                if theme:
-                    next_theme = theme
-                    logger.info(f"🎯 [PRIORITY] Выбираем тему '{next_theme['theme_name']}' (по порядку)")
+            # Для стейджа 4 и выше - используем порядок по важности
+            theme_rotation_order = list(themes.keys())
+        
+        # Подсчитываем сколько вопросов задано по каждой теме
+        theme_question_counts = {}
+        user_completed = self.user_completed_slots.get(user_id, {})
+        
+        for theme_name in theme_rotation_order:
+            completed_count = len(user_completed.get(theme_name, []))
+            theme_question_counts[theme_name] = completed_count
+            
+        logger.info(f"🔄 [ROTATION] {user_id}: Счетчик вопросов по темам: {theme_question_counts}")
+        
+        # Находим тему с МИНИМАЛЬНЫМ количеством заданных вопросов (для ротации)
+        min_questions = min(theme_question_counts.values())
+        candidates_for_rotation = [theme for theme, count in theme_question_counts.items() if count == min_questions]
+        
+        logger.info(f"🔄 [ROTATION] {user_id}: Минимум вопросов: {min_questions}, кандидаты: {candidates_for_rotation}")
+        
+        # Из кандидатов выбираем первую по порядку, у которой есть незавершенные слоты
+        next_theme = None
+        for theme_name in theme_rotation_order:
+            if theme_name in candidates_for_rotation:
+                # Проверяем есть ли у этой темы незавершенные слоты
+                theme_data = next((t for t in all_uncompleted_themes if t["theme_name"] == theme_name), None)
+                if theme_data:
+                    next_theme = theme_data
+                    logger.info(f"🎯 [ROTATION] Выбираем тему '{next_theme['theme_name']}' для ротации (задано {min_questions} вопросов)")
                     break
+        
+        if not next_theme:
+            logger.warning(f"⚠️ [NO_THEME] {user_id}: Не найдена подходящая тема! all_uncompleted_themes={len(all_uncompleted_themes)}")
+            return None
         
         logger.info(f"🎯 [NEXT_THEME] {user_id}: Выбрана тема '{next_theme['theme_name']}', следующий слот: '{next_theme['next_slot']}'")
         
@@ -633,6 +705,15 @@ class StageController:
         
         if user_id in self.user_last_activity:
             del self.user_last_activity[user_id]
+            
+        # 🔥 ДОБАВЛЯЕМ ОЧИСТКУ ЗАВЕРШЕННЫХ СЛОТОВ И ЗАДАННЫХ ВОПРОСОВ
+        if user_id in self.user_completed_slots:
+            del self.user_completed_slots[user_id]
+            logger.info(f"🔄 [RESET] Очищены завершенные слоты для {user_id}")
+            
+        if user_id in self.user_asked_questions:
+            del self.user_asked_questions[user_id]
+            logger.info(f"🔄 [RESET] Очищены заданные вопросы для {user_id}")
     
     def get_stage_stats(self, user_id: str) -> Dict[str, Any]:
         """Получает статистику стейджа для пользователя"""

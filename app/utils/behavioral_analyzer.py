@@ -473,7 +473,8 @@ class BehavioralAnalyzer:
             relationship_stage = conversation_context.get('relationship_stage', 'introduction')
             personalization_level = conversation_context.get('personalization_level', 0.0)
             
-            if relationship_stage == 'introduction':
+            # НЕ даем бонус mysterious если эмоция rude - она должна быть приоритетной
+            if relationship_stage == 'introduction' and dominant_emotion != 'rude':
                 strategy_scores['mysterious'] += 1.0
                 strategy_scores['playful'] += 0.5
             elif relationship_stage in ['building_trust', 'close_friend']:
@@ -649,7 +650,7 @@ class BehavioralAnalyzer:
             'engagement_level': 'moderate',
             'relationship_needs': ['general_interaction'],
             'intimacy_preference': 'medium',
-            'recommended_strategy': 'mysterious',  # Безопасная стратегия для знакомства
+            'recommended_strategy': 'mysterious',  
             'strategy_confidence': 0.6,
             'behavioral_adjustments': {
                 'tone_modifiers': ['friendly', 'curious'],

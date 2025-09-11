@@ -370,6 +370,21 @@ def create_app():
         except Exception as e:
             return json_response({'error': str(e), 'type': type(e).__name__}, 500)
 
+    @app.route('/api/user/<user_id>/reset', methods=['POST'])
+    def reset_user_state(user_id):
+        """Сбрасывает состояние пользователя (стейджи, вопросы, слоты)"""
+        try:
+            from app.utils.stage_controller import stage_controller
+            stage_controller.reset_user_stage(user_id)
+            
+            return json_response({
+                'message': f'User state reset successfully for {user_id}',
+                'user_id': user_id,
+                'timestamp': datetime.utcnow().isoformat()
+            })
+        except Exception as e:
+            return json_response({'error': str(e), 'type': type(e).__name__}, 500)
+
     @app.errorhandler(404)
     def not_found(error):
         return json_response({'error': 'Endpoint not found'}), 404

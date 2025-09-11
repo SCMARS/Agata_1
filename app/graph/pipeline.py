@@ -215,16 +215,20 @@ class AgathaPipeline:
                 print(f"🔍 [DEBUG_MAIN] Содержит вопрос: {has_question}")
                 print(f"🔍 [DEBUG_MAIN] next_theme_slot: {result.get('next_theme_slot', {})}")
                 
-                # 🎯 FALLBACK ЛОГИКА ОТСЛЕЖИВАНИЯ
-                if has_question and result.get("next_theme_slot", {}):
+                # 🎯 FALLBACK ЛОГИКА ОТСЛЕЖИВАНИЯ - ТОЛЬКО если принудительная замена НЕ БЫЛА выполнена
+                force_question_used = result.get("force_question_used", False)
+                if has_question and result.get("next_theme_slot", {}) and not force_question_used:
                     print(f"🔍 [DEBUG_MAIN] Добавляем fallback отслеживание...")
                     
                     # Извлекаем вопрос из ответа
                     question_match = re.search(r'([^.!?]*\?)', response_text)
                     if question_match:
-                        asked_question = question_match.group(1).strip() + "?"
-                        print(f"✅ [FALLBACK] Найден вопрос: '{asked_question}'")
-                        stage_controller.mark_question_asked(user_id, asked_question)
+                        raw_question = question_match.group(1).strip()
+                        # Нормализуем вопрос: удаляем эмодзи и лишние символы
+                        normalized_question = re.sub(r'[😊😄😃😀🙂🙃😉😌🤗]', '', raw_question).strip()
+                        normalized_question = re.sub(r'\s+', ' ', normalized_question).strip() + "?"
+                        print(f"✅ [FALLBACK] Найден вопрос: '{raw_question}?' -> нормализован: '{normalized_question}'")
+                        stage_controller.mark_question_asked(user_id, normalized_question)
                         
                         # Отмечаем слот как завершенный
                         next_theme_slot = result.get("next_theme_slot", {})
@@ -236,6 +240,8 @@ class AgathaPipeline:
                             print(f"✅ [FALLBACK] Слот '{slot}' в теме '{theme_name}' отмечен как завершенный")
                     else:
                         print(f"⚠️ [FALLBACK] Не удалось извлечь вопрос из: '{response_text}'")
+                elif force_question_used:
+                    print(f"🚫 [FALLBACK] Пропускаем fallback - использована принудительная замена вопроса")
                 else:
                     print(f"🔍 [DEBUG_MAIN] Нет условий для отслеживания: has_question={has_question}, next_theme_slot={result.get('next_theme_slot', {})}")
                 
@@ -274,6 +280,7 @@ class AgathaPipeline:
                 "parts": result["processed_response"].get("parts", []),
                 "has_question": result["processed_response"].get("has_question", False),
                 "delays_ms": result["processed_response"].get("delays_ms", []),
+                "response": " ".join(result["processed_response"].get("parts", [])) if result.get("processed_response") else "",
                 "behavioral_analysis": result.get("behavioral_analysis", {}),
                 "current_strategy": result.get("current_strategy", "unknown"),
                 "stage_number": result.get("stage_number", 1),
@@ -603,6 +610,12 @@ class AgathaPipeline:
             state["current_strategy"] = recommended_strategy
             state["behavioral_analysis"] = behavioral_analysis
             state["strategy_confidence"] = strategy_confidence
+            
+            # Отладка: что сохраняется в state
+            print(f"🔍 [DEBUG_STATE] Сохраняем в state:")
+            print(f"  behavioral_analysis ключи: {list(behavioral_analysis.keys()) if behavioral_analysis else 'None'}")
+            print(f"  recommended_strategy: {behavioral_analysis.get('recommended_strategy', 'Not found')}")
+            print(f"  strategy_name: {behavioral_analysis.get('strategy_name', 'Not found')}")
 
             # Логируем выбор стратегии
             log_info(f"🎭 Behavioral Analysis for {user_id}: ✅ SUCCESS")
@@ -724,12 +737,19 @@ class AgathaPipeline:
             except:
                 meta_time = datetime.now()
         time_context = self.time_utils.get_time_context(meta_time)
+        user_messages = [m for m in state.get("messages", []) if m.get('role') == 'user']
+        is_first_contact = (state.get("day_number", 1) == 1 and len(user_messages) <= 1)
+        adaptive_max_length = 180 if is_first_contact else settings.MAX_MESSAGE_LENGTH
+        if is_first_contact:
+            log_info("🧊 FIRST_CONTACT: short and reserved reply enabled (max_length=180)")
+            # Сделаем тон более сдержанным на первый контакт
+            state["current_strategy"] = "reserved"
 
         context_data = {
             'time_context': time_context,
             'memory_context': state["memory_context"],
             'user_message': state["normalized_input"],
-            'max_length': settings.MAX_MESSAGE_LENGTH,
+            'max_length': adaptive_max_length,
             'day_number': state["day_number"]
         }
         
@@ -857,6 +877,10 @@ class AgathaPipeline:
                     # Вызываем LLM с новым промптом (список сообщений)
                     response = self.llm.invoke(formatted_prompt_to_use)
                     state["llm_response"] = response.content.strip()
+                    
+                    # 🎯 ПРИНУДИТЕЛЬНОЕ ДОБАВЛЕНИЕ ВОПРОСОВ ПОСЛЕ LLM (новый путь)
+                    self._enforce_stage_questions_post_llm(state)
+                    
                     log_info(f"✅ LLM вызван с новым системным промптом")
                 except Exception as e:
                     log_info(f"❌ Ошибка с новым промптом: {e}, fallback к старому")
@@ -908,6 +932,9 @@ class AgathaPipeline:
                 response = self.llm.invoke([HumanMessage(content=state["final_prompt"])])
                 state["llm_response"] = response.content.strip()
 
+            # 🎯 ПРИНУДИТЕЛЬНОЕ ДОБАВЛЕНИЕ ВОПРОСОВ ПОСЛЕ LLM
+            self._enforce_stage_questions_post_llm(state)
+
             log_info(f"✅ OpenAI response length: {len(state['llm_response'])} chars")
             log_info(f"📝 Response preview: {state['llm_response'][:200]}...")
 
@@ -917,12 +944,78 @@ class AgathaPipeline:
 
         return state
     
+    def _enforce_stage_questions_post_llm(self, state: PipelineState):
+        """Принудительно добавляет вопросы из стейджа после LLM"""
+        print("🔥🔥🔥 _enforce_stage_questions_post_llm ВЫЗВАН!")
+        try:
+            user_id = state["user_id"]
+            response_text = state.get("llm_response", "")
+            may_ask_question = state.get("may_ask_question", False)
+            
+            # 🚫 КРИТИЧЕСКИ ВАЖНО: НЕ задавать вопрос если не время!
+            if not may_ask_question:
+                print(f"🚫 [FORCE_QUESTION] НЕ время для вопроса (may_ask_question={may_ask_question}). Удаляем вопросы из LLM ответа.")
+                log_info(f"🚫 [FORCE_QUESTION] НЕ время для вопроса (may_ask_question={may_ask_question}). Удаляем вопросы из LLM ответа.")
+                
+                # Удаляем любые вопросы из LLM ответа
+                import re
+                original_response = response_text
+                response_no_questions = re.sub(r'([^.!?]*\?)', '', response_text).strip()
+                if response_no_questions != original_response:
+                    state["llm_response"] = response_no_questions
+                    print(f"🚫 [NO_QUESTION] Удалили вопросы: '{original_response}' -> '{response_no_questions}'")
+                    log_info(f"🚫 [NO_QUESTION] Удалили вопросы: '{original_response}' -> '{response_no_questions}'")
+                
+                return state
+            
+            # 🔥 ИСПОЛЬЗУЕМ ПРАВИЛЬНЫЙ next_theme_slot ИЗ STAGE_CONTROLLER
+            next_theme_slot = state.get("next_theme_slot", {})
+            print(f"🔍 [FORCE_QUESTION] next_theme_slot: {next_theme_slot}")
+            log_info(f"🔍 [FORCE_QUESTION] next_theme_slot: {next_theme_slot}")
+
+            if next_theme_slot and "next_slot" in next_theme_slot:
+                required_q = next_theme_slot["next_slot"].strip()
+                if not required_q.endswith("?"):
+                    required_q += "?"
+                
+                print(f"🔍 [FORCE_QUESTION] Требуемый вопрос: '{required_q}'")
+                print(f"🔍 [FORCE_QUESTION] Уже задан? {stage_controller.is_question_already_asked(user_id, required_q)}")
+                
+                # Проверяем, был ли этот вопрос уже задан
+                if not stage_controller.is_question_already_asked(user_id, required_q):
+                    print(f"❓ [FORCE_QUESTION] Принудительно добавляем вопрос из слота: '{required_q}'")
+                    
+                    # Удаляем любой вопрос, который мог сгенерировать LLM
+                    import re
+                    response_no_q = re.sub(r'([^.!?]*\?)', '', response_text).strip()
+                    
+                    # Добавляем принудительный вопрос
+                    sep = " " if response_no_q and not response_no_q.endswith(('.', '!', '?')) else ""
+                    new_response = (response_no_q or "Привет").strip() + f"{sep} {required_q}"
+                    state["llm_response"] = new_response
+                    
+                    print(f"🚀 [FORCE_QUESTION] ИЗМЕНИЛИ ОТВЕТ: '{response_text}' -> '{new_response}'")
+                    
+                    # Отмечаем вопрос как заданный
+                    stage_controller.mark_question_asked(user_id, required_q)
+                    # Устанавливаем флаг для предотвращения fallback обработки
+                    state["force_question_used"] = True
+                    log_info(f"✅ [FORCE_QUESTION] Вопрос '{required_q}' добавлен и отмечен как заданный.")
+                else:
+                    log_info(f"⚠️ [FORCE_QUESTION] Вопрос '{required_q}' уже был задан. Пропускаем принудительное добавление.")
+            else:
+                log_info("🚫 [FORCE_QUESTION] Нет следующего слота для принудительного вопроса.")
+                
+        except Exception as e:
+            log_info(f"❌ Ошибка в _enforce_stage_questions_post_llm: {e}")
+    
     async def _postprocess(self, state: PipelineState) -> PipelineState:
         """Node 7: Post-process response - АСИНХРОННЫЙ"""
         response_text = state["llm_response"]
         
         # Фильтрация вопросов
-        may_ask_question = state.get("may_ask_question", True)
+
+        may_ask_question = bool(state.get("may_ask_question", False))
         log_info(f"🚫 [FILTER-DEBUG] may_ask_question из состояния: {may_ask_question}")
         log_info(f"🚫 [FILTER-DEBUG] response_text: '{response_text}'")
         filtered_response, has_question_after = question_filter.filter_questions(response_text, may_ask_question)
@@ -933,6 +1026,11 @@ class AgathaPipeline:
             log_info(f"🚫 [FILTER] ПОСЛЕ: '{filtered_response}'")
             state["llm_response"] = filtered_response
             response_text = filtered_response
+
+        # Если после фильтра ответ опустел — подставим нейтральную заготовку
+        if not response_text or not str(response_text).strip():
+            log_info("⚠️ [FILTER] Ответ пустой после фильтрации — подставляем нейтральную фразу")
+            response_text = "Окей."
         
         # Сохраняем has_question_after в состоянии для доступа позже
         state["has_question_after_filter"] = has_question_after
@@ -940,31 +1038,9 @@ class AgathaPipeline:
         # Получаем профиль пользователя для контекста
         user_id = state["user_id"]
         
-        # 🎯 ОТСЛЕЖИВАНИЕ ЗАДАННЫХ ВОПРОСОВ
+        # 🎯 ОТСЛЕЖИВАНИЕ ЗАДАННЫХ ВОПРОСОВ - ОТКЛЮЧЕНО, используем _enforce_stage_questions_post_llm
         log_info(f"🔍 [DEBUG_TRACKING] has_question_after: {has_question_after}, response_text: '{response_text[:50]}...'")
-        if has_question_after:
-            # Извлекаем вопрос из ответа для отслеживания
-            question_match = re.search(r'([^.!?]*\?)', response_text)
-            log_info(f"🔍 [DEBUG_TRACKING] question_match: {question_match.group(1) if question_match else None}")
-            if question_match:
-                asked_question = question_match.group(1).strip() + "?"
-                log_info(f"🔍 [DEBUG_TRACKING] asked_question: '{asked_question}'")
-                stage_controller.mark_question_asked(user_id, asked_question)
-                
-                # Определяем завершенный слот на основе next_theme_slot
-                next_theme_slot = state.get("next_theme_slot", {})
-                log_info(f"🔍 [DEBUG_TRACKING] next_theme_slot: {next_theme_slot}")
-                if next_theme_slot and "theme_name" in next_theme_slot and "next_slot" in next_theme_slot:
-                    theme_name = next_theme_slot["theme_name"]
-                    slot = next_theme_slot["next_slot"]
-                    current_stage = state.get("stage_number", 1)
-                    log_info(f"🔍 [DEBUG_TRACKING] Отмечаем слот '{slot}' в теме '{theme_name}' как завершенный")
-                    stage_controller.mark_slot_completed(user_id, current_stage, theme_name, slot)
-                    log_info(f"✅ [SLOT_TRACKING] Завершен слот '{slot}' в теме '{theme_name}' для пользователя {user_id}")
-                else:
-                    log_info(f"⚠️ [DEBUG_TRACKING] next_theme_slot неполный: {next_theme_slot}")
-        else:
-            log_info(f"⚠️ [DEBUG_TRACKING] Вопрос не обнаружен в ответе")
+        # Логика принудительного добавления вопросов перенесена в _enforce_stage_questions_post_llm
         memory = self._get_memory(user_id)
 
         # Получаем или создаем MessageController для пользователя
@@ -982,7 +1058,7 @@ class AgathaPipeline:
         
         if memory:
             try:
-                # Получаем инсайты о разговоре
+
                 insights = memory.get_conversation_insights()
                 context.update({
                     'recent_mood': insights.get('recent_mood', 'neutral'),

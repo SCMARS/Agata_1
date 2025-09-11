@@ -469,12 +469,20 @@ class ComposePromptNode:
             now_iso = state.get("meta_time", "").isoformat() if state.get("meta_time") else ""
             day_number = state.get("day_number", 1)
             
-            # Контроль вопросов: только каждое 3-е сообщение
+
             user_message_count = self._get_user_message_count(state)
-            may_ask_question = (user_message_count % 3 == 0)  # Вопрос только каждое 3-е сообщение
+            current_stage_number = state.get("stage_number", 1)
+            if user_message_count == 1:
+                may_ask_question = False  
+            elif current_stage_number == 1:
+
+                may_ask_question = True
+            else:
+                # Далее: вопросы на 4, 7, 10... сообщениях (интервал 3 от второго хода)
+                may_ask_question = ((user_message_count - 1) % 3 == 0)
             
-            logger.info(f"🎯 [QUESTIONS] Пользователь {user_id}: сообщений={user_message_count}, можно_спросить={may_ask_question} (каждое 3-е)")
-            print(f"🎯 [QUESTIONS] Пользователь {user_id}: сообщений={user_message_count}, можно_спросить={may_ask_question} (каждое 3-е)")
+            logger.info(f"🎯 [QUESTIONS] Пользователь {user_id}: сообщений={user_message_count}, можно_спросить={may_ask_question} (1,4,7,10...)")
+            print(f"🎯 [QUESTIONS] Пользователь {user_id}: сообщений={user_message_count}, можно_спросить={may_ask_question} (1,4,7,10...)")
             
             # Динамический путь с расчетом времени
             memory_context = state.get("memory_context", "")
@@ -510,20 +518,38 @@ class ComposePromptNode:
                 stage_number = state.get("stage_number", 1)
                 day_number = state.get("day_number", 1)
                 
-                # 🔥 УБРАН ХОЛОДНЫЙ СТАРТ: Используем эмоциональный анализ с первого сообщения
-                user_messages = [msg for msg in state.get("messages", []) if msg.get('role') == 'user']
-                user_message_count = len(user_messages)
-                logger.info(f"🔥 [NO_COLD_START] Найдено {user_message_count} сообщений от пользователя - используем эмоциональный анализ")
+                logger.info("🔍 [DEBUG_BEFORE_BEHAVIORAL] Дошли до проверки behavioral_analysis")
+                print("🔍 [DEBUG_BEFORE_BEHAVIORAL] Дошли до проверки behavioral_analysis")
                 
-                # Анализируем поведение и адаптируем стратегию (всегда используем реальный анализ)
-                behavioral_analysis = self.behavioral_adaptation.analyze_and_adapt(
-                    messages=state.get("conversation_history", []),
-                    user_profile=state.get("user_profile", {}),
-                    conversation_context=state.get("conversation_context", {})
-                )
+                # 🔥 ИСПОЛЬЗУЕМ УЖЕ ГОТОВЫЙ АНАЛИЗ ИЗ STATE
+                behavioral_analysis = state.get("behavioral_analysis", {})
+                logger.info(f"🔍 [DEBUG] behavioral_analysis из state: {bool(behavioral_analysis)}, ключи: {list(behavioral_analysis.keys()) if behavioral_analysis else 'None'}")
+                if behavioral_analysis.get('recommended_strategy'):
+                    logger.info(f"🔥 [REUSE] Используем готовый анализ из state: {behavioral_analysis.get('recommended_strategy', 'unknown')}")
+                    logger.info(f"🔥 [REUSE] Эмоция: {behavioral_analysis.get('dominant_emotion', 'unknown')}")
+                elif not behavioral_analysis:
+                    # Если анализа нет, делаем новый
+                    user_messages = [msg for msg in state.get("messages", []) if msg.get('role') == 'user']
+                    user_message_count = len(user_messages)
+                    logger.info(f"🔥 [FALLBACK] Анализа нет в state, делаем новый для {user_message_count} сообщений")
+                    behavioral_analysis = self.behavioral_adaptation.analyze_and_adapt(
+                        messages=state.get("messages", []),
+                        user_profile=state.get("user_profile", {}),
+                        conversation_context=state.get("conversation_context", {})
+                    )
+                    logger.info(f" [NEW] Создан новый анализ: {behavioral_analysis.get('strategy_name', 'unknown')} для {len(state.get('messages', []))} сообщений")
+                else:
+                    logger.info(f"🔥 [REUSE] Используем готовый анализ из state: {behavioral_analysis.get('strategy_name', 'unknown')}")
+                    logger.info(f"🔥 [REUSE] Эмоция: {behavioral_analysis.get('behavior_analysis', {}).get('dominant_emotion', 'unknown')}")
                 
-                # Добавляем behavioral instructions к memory context
-                behavioral_instructions = behavioral_analysis.get("behavioral_instructions", "")
+                # Создаем behavioral instructions из анализа
+                # Добавляем флаг первого контакта (нейтральный старт)
+                try:
+                    user_msg_count = self._get_user_message_count(state)
+                except Exception:
+                    user_msg_count = 1
+                behavioral_analysis["is_first_contact"] = (user_msg_count <= 1)
+                behavioral_instructions = self._create_behavioral_instructions(behavioral_analysis)
                 enhanced_memory_context_with_behavior = f"{enhanced_memory_context}\n\n{behavioral_instructions}"
                 
 
@@ -663,6 +689,8 @@ class ComposePromptNode:
                 }
                 
                 logger.info(f"✅ Динамический промпт составлен для пользователя {user_id}")
+                
+                
                 return updated_state
             
             # Fallback: базовый путь
@@ -729,6 +757,10 @@ class ComposePromptNode:
             }
             
             logger.info(f"⚠️ СТАРЫЙ ПУТЬ: Промпт составлен для пользователя {user_id}")
+            
+            # 🎯 ПРИНУДИТЕЛЬНОЕ ДОБАВЛЕНИЕ ВОПРОСОВ ИЗ СТЕЙДЖА (старый путь)
+            # self._enforce_stage_questions(updated_state, user_id)  # ОТКЛЮЧЕНО: используем правильную логику в pipeline
+            
             return updated_state
             
         except Exception as e:
@@ -752,6 +784,118 @@ class ComposePromptNode:
             logger.warning(f"Ошибка загрузки биографии: {e}")
             return agata_loader._get_fallback_bio()
     
+    def _create_behavioral_instructions(self, behavioral_analysis: Dict[str, Any]) -> str:
+        """Создает инструкции поведения на основе behavioral анализа"""
+        if not behavioral_analysis:
+            return ""
+        
+        is_first_contact = bool(behavioral_analysis.get("is_first_contact", False))
+        strategy_name = behavioral_analysis.get("strategy_name", "balanced")
+        behavior_analysis = behavioral_analysis.get("behavior_analysis", {})
+        adapted_behavior = behavioral_analysis.get("adapted_behavior", {})
+        
+        # Базовые инструкции по стратегии
+        strategy_instructions = {
+            "mysterious": "Будь загадочной и интригующей. Не раскрывай все сразу, оставляй место для фантазии.",
+            "playful": "Будь игривой и веселой. Используй юмор, шутки и легкий флирт.",
+            "caring": "Будь заботливой и внимательной. Проявляй эмпатию и поддержку.",
+            "supportive": "Будь поддерживающей и понимающей. Слушай и помогай.",
+            "intellectual": "Будь умной и эрудированной. Обсуждай серьезные темы.",
+            "reserved": "Будь сдержанной и осторожной. Не торопись с близостью.",
+            "balanced": "Будь естественной и сбалансированной. Адаптируйся к ситуации."
+        }
+        
+        base_instruction = strategy_instructions.get(strategy_name, strategy_instructions["balanced"])
+        
+        # Создаем детальные инструкции
+        instructions = [base_instruction]
+        
+        # Нейтральный холодный старт (первый контакт)
+        if is_first_contact:
+            instructions.append("ПЕРВОЕ СООБЩЕНИЕ: максимально нейтрально и коротко (1 короткая фраза), без эмоций и без вопросов.")
+            instructions.append("Запрещены восклицания, эмодзи, тёплые формулы приветствия. Примеры: 'Привет' / 'Ну привет' / 'Окей'.")
+            # Возвращаем сразу, чтобы правила были жёсткими в первый ход
+            return "\n".join(instructions)
+        
+        # Добавляем детали из анализа
+        tone_modifiers = adapted_behavior.get("tone_modifiers", [])
+        response_style = adapted_behavior.get("response_style", "balanced")
+        empathy_level = adapted_behavior.get("empathy_level", "medium")
+        humor_usage = adapted_behavior.get("humor_usage", "occasional")
+        
+        if tone_modifiers:
+            modifiers_text = ", ".join(tone_modifiers)
+            instructions.append(f"Тон: {modifiers_text}")
+        
+        if response_style != "balanced":
+            instructions.append(f"Стиль ответов: {response_style}")
+        
+        if empathy_level != "medium":
+            instructions.append(f"Уровень эмпатии: {empathy_level}")
+        
+        if humor_usage != "occasional":
+            instructions.append(f"Использование юмора: {humor_usage}")
+        
+        # Добавляем эмоциональные инструкции
+        dominant_emotion = behavior_analysis.get("dominant_emotion", "neutral")
+        if dominant_emotion != "neutral":
+            emotion_instructions = {
+                "positive": "Пользователь в хорошем настроении - будь позитивной и энергичной",
+                "negative": "Пользователь расстроен - будь поддерживающей и понимающей",
+                "excited": "Пользователь возбужден - раздели его энтузиазм",
+                "sad": "Пользователь грустит - будь нежной и заботливой",
+                "angry": "Пользователь зол - будь очень злой и отвечай жестко и грубо "
+            }
+            if dominant_emotion in emotion_instructions:
+                instructions.append(emotion_instructions[dominant_emotion])
+        
+        # Обязательные короткие комментарии к ответу
+        instructions.append("Всегда начинай ответ с одной очень короткой ремарки о настроении/эмоции собеседника (1 короткая фраза, без клише).")
+        instructions.append("Всегда добавляй краткую живую ремарку к последнему сообщению пользователя (1 короткая деталь/ассоциация, без вопроса).")
+        
+        return "\n".join(instructions)
+    
+    def _enforce_stage_questions(self, state: Dict[str, Any], user_id: str):
+        """Принудительно добавляет вопросы из стейджа"""
+        try:
+            from app.utils.stage_controller import stage_controller
+            
+            # Список приоритетных вопросов по порядку
+            priority_questions = [
+                "Откуда ты?", "Кем работаешь?", "Чем любишь заниматься в свободное время?",
+                "Как давно там живёшь?", "Давно этим занимаешься?", "У тебя активный отдых или спокойный?",
+                "Почему именно этот город?", "Что нравится больше всего?", "Как относишься к спорту?",
+                "Что тебе там больше всего нравится?", "Сколько удается зарабатывать, если не секрет?", "Любишь готовить?",
+                "Какие места посоветуешь посетить?", "Легко ли совмещать с личной жизнью?", "Какие фильмы или книги предпочитаешь?",
+                "Как отношения с коллегами?"
+            ]
+            
+            # Найдём первый неспрошенный вопрос
+            real_question = None
+            for q in priority_questions:
+                if not stage_controller.is_question_already_asked(user_id, q):
+                    real_question = q
+                    break
+            
+            if real_question:
+                logger.info(f"❓ [FORCE_QUESTION] Принудительно добавляем вопрос: '{real_question}'")
+                
+                # Модифицируем final_prompt, добавляя вопрос в конец
+                current_prompt = state.get("final_prompt", "")
+                if current_prompt:
+                    # Добавляем вопрос в конец промпта как обязательную инструкцию
+                    enforced_prompt = current_prompt + f"\n\n🚨 ОБЯЗАТЕЛЬНО ЗАДАЙ ЭТОТ ВОПРОС: '{real_question}'"
+                    state["final_prompt"] = enforced_prompt
+                    
+                    # Отметим вопрос как заданный
+                    stage_controller.mark_question_asked(user_id, real_question)
+                    logger.info(f"✅ [FORCE_QUESTION] Вопрос добавлен в промпт: '{real_question}'")
+            else:
+                logger.info(f"⚠️ [NO_QUESTIONS] Все приоритетные вопросы уже заданы")
+                
+        except Exception as e:
+            logger.error(f"❌ Ошибка принудительного добавления вопросов: {e}")
+
     def get_prompt_info(self) -> Dict[str, Any]:
         """Возвращает информацию о промпте для диагностики"""
         return {

@@ -1,6 +1,4 @@
-"""
-Система ежедневных поведенческих промптов для Агаты
-"""
+
 import logging
 from typing import Dict, Optional
 from datetime import datetime, timedelta
@@ -14,7 +12,7 @@ class DailyBehaviorManager:
         self.daily_prompts = self._initialize_daily_prompts()
     
     def get_day_prompt(self, day_number: int) -> str:
-        """Получает промпт для определенного дня общения"""
+
         if day_number < 1:
             day_number = 1
         elif day_number > 30:
