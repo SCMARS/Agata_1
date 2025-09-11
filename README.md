@@ -66,7 +66,7 @@ python run_server.py
 
 # Терминал 2 - Telegram бот
 source venv/bin/activate
-python run_telegram_bot.py
+python simple_telegram_bot.py
 ```
 
 ## ✅ Проверка работы

@@ -130,7 +130,7 @@ start_bot() {
     print_status "Запускаем Telegram бота..."
     
     source venv/bin/activate
-    nohup python run_telegram_bot.py > bot.log 2>&1 &
+    nohup python simple_telegram_bot.py > bot.log 2>&1 &
     BOT_PID=$!
     echo $BOT_PID > bot.pid
     
