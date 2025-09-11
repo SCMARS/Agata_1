@@ -24,3 +24,4 @@ __pycache__/
 # Notebooks/large
 *.ipynb
 
+config.env
