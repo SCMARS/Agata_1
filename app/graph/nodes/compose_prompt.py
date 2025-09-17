@@ -482,6 +482,7 @@ class ComposePromptNode:
             
 
 
+            # Согласно стейджу: вопросы на 2-е, 4-е, 6-е, 8-е, 10-е, 12-е сообщение
             may_ask_question = (user_message_count % 2) == 0 and user_message_count >= 2
             
             # ОТЛАДКА: выводим информацию о подсчете
