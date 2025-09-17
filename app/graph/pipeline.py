@@ -336,8 +336,7 @@ class AgathaPipeline:
         total_message_count = len(state.get("messages", []))
         user_message_count = len(user_messages)
         
-        # 🔥 ИСПРАВЛЕНИЕ: Используем реальное количество сообщений пользователя
-        # Система уже правильно считает user_messages, используем это значение
+
         log_info(f"🔄 [STAGE_FIX] Реальные сообщения пользователя: {user_message_count}")
         
         # Если есть объединенные сообщения в normalized_input, это не влияет на подсчет стейджей
@@ -356,7 +355,7 @@ class AgathaPipeline:
         
         if state["normalized_input"]:
             stage_number = stage_controller.get_user_stage(state["user_id"], user_message_count)
-            stage_controller.analyze_user_response_and_close_slots(
+            await stage_controller.analyze_user_response_and_close_slots(
                 state["user_id"], 
                 state["normalized_input"], 
                 stage_number
