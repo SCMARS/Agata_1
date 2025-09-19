@@ -5,7 +5,7 @@ class TimeUtils:
     """Utilities for time-aware context generation"""
     
     @staticmethod
-    def get_time_context(current_time: datetime) -> str:
+    def get_time_context(current_time: datetime, should_include_greeting: bool = False) -> str:
         """Generate time-aware context string"""
         hour = current_time.hour
         
@@ -27,9 +27,12 @@ class TimeUtils:
         date_str = current_time.strftime("%d.%m.%Y")
         
         context_parts = [
-            f"Сейчас {time_of_day}, {time_str}, {date_str}",
-            f"Подходящее приветствие: {greeting}"
+            f"Сейчас {time_of_day}, {time_str}, {date_str}"
         ]
+        
+        # Добавляем приветствие только если это нужно
+        if should_include_greeting:
+            context_parts.append(f"Подходящее приветствие: {greeting}")
         
         # Add contextual notes
         if hour < 6 or hour > 23:

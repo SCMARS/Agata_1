@@ -892,26 +892,34 @@ class AgathaPipeline:
                     final_prompt_to_use = state.get("final_prompt")
                     log_info(f"🔧 Используем LEGACY промпт")
                 
-                # Используем системный промпт
-                log_info(f"🤖 Calling OpenAI API с новым системным промптом")
-                log_info(f"📝 Memory data: {state.get('memory', {})}")
-                log_info(f"📝 Formatted prompt type: {type(formatted_prompt_to_use)}")
-                
-                try:
-                    # Вызываем LLM с новым промптом (список сообщений)
-                    response = self.llm.invoke(formatted_prompt_to_use)
-                    state["llm_response"] = response.content.strip()
+                # 🚨 ХАРДКОД ДЛЯ ПЕРШОГО ПОВІДОМЛЕННЯ (ПЕРЕД LLM)
+                user_message_count = len([msg for msg in state.get("messages", []) if msg.get("role") == "user"])
+                print(f"🚨 [HARDCODE_CHECK] user_message_count={user_message_count}, messages={[msg.get('content', '') for msg in state.get('messages', [])]}")
+                if user_message_count == 1:
+                    state["llm_response"] = "Привет"
+                    print(f"🚨 [HARDCODE] Перше повідомлення -> 'Привет'")
+                    log_info(f"🚨 [HARDCODE] Перше повідомлення -> 'Привет'")
+                else:
+                    # Используем системный промпт
+                    log_info(f"🤖 Calling OpenAI API с новым системным промптом")
+                    log_info(f"📝 Memory data: {state.get('memory', {})}")
+                    log_info(f"📝 Formatted prompt type: {type(formatted_prompt_to_use)}")
                     
-                    # 🎯 ПРИНУДИТЕЛЬНОЕ ДОБАВЛЕНИЕ ВОПРОСОВ ПОСЛЕ LLM (новый путь)
-                    self._enforce_stage_questions_post_llm(state)
-                    
-                    log_info(f"✅ LLM вызван с новым системным промптом")
-                except Exception as e:
-                    log_info(f"❌ Ошибка с новым промптом: {e}, fallback к старому")
-                    # Fallback к старому способу
-                    fallback_prompt = final_prompt_to_use or state.get("final_prompt", "")
-                    response = self.llm.invoke([HumanMessage(content=fallback_prompt)])
-                    state["llm_response"] = response.content.strip()
+                    try:
+                        # Вызываем LLM с новым промптом (список сообщений)
+                        response = self.llm.invoke(formatted_prompt_to_use)
+                        state["llm_response"] = response.content.strip()
+                        
+                        # 🎯 ПРИНУДИТЕЛЬНОЕ ДОБАВЛЕНИЕ ВОПРОСОВ ПОСЛЕ LLM (новый путь)
+                        self._enforce_stage_questions_post_llm(state)
+                        
+                        log_info(f"✅ LLM вызван с новым системным промптом")
+                    except Exception as e:
+                        log_info(f"❌ Ошибка с новым промптом: {e}, fallback к старому")
+                        # Fallback к старому способу
+                        fallback_prompt = final_prompt_to_use or state.get("final_prompt", "")
+                        response = self.llm.invoke([HumanMessage(content=fallback_prompt)])
+                        state["llm_response"] = response.content.strip()
                 
             else:
                 # Используем базовый способ
@@ -980,17 +988,32 @@ class AgathaPipeline:
             if not may_ask_question:
                 print(f"🚫 [FORCE_QUESTION] НЕ время для вопроса (may_ask_question={may_ask_question}). Удаляем вопросы из LLM ответа.")
                 log_info(f"🚫 [FORCE_QUESTION] НЕ время для вопроса (may_ask_question={may_ask_question}). Удаляем вопросы из LLM ответа.")
-                
-                # Удаляем любые вопросы из LLM ответа
+
                 import re
                 original_response = response_text
-                response_no_questions = re.sub(r'([^.!?]*\?)', '', response_text).strip()
-                if response_no_questions != original_response:
+                # Удаляем только вопросительные предложения, сохраняя остальной текст
+                response_no_questions = re.sub(r'[^.!?]*\?[^.!?]*', '', response_text).strip()
+                # Убираем лишние пробелы и знаки препинания
+                response_no_questions = re.sub(r'\s+', ' ', response_no_questions).strip()
+                response_no_questions = re.sub(r'[,;]\s*$', '', response_no_questions)  # убираем запятые в конце
+                
+                if response_no_questions and response_no_questions != original_response:
                     state["llm_response"] = response_no_questions
                     print(f"🚫 [NO_QUESTION] Удалили вопросы: '{original_response}' -> '{response_no_questions}'")
                     log_info(f"🚫 [NO_QUESTION] Удалили вопросы: '{original_response}' -> '{response_no_questions}'")
-                
+                elif not response_no_questions:
+                    # Если после удаления вопросов ничего не осталось, подставляем "Привет" для первого сообщения
+                    user_message_count = len([msg for msg in state.get("messages", []) if msg.get("role") == "user"])
+                    if user_message_count == 1:
+                        state["llm_response"] = "Привет"
+                        print(f"🚫 [NO_QUESTION] Пустой ответ для первого сообщения -> 'Привет'")
+                        log_info(f"🚫 [NO_QUESTION] Пустой ответ для первого сообщения -> 'Привет'")
+
                 return state
+            
+            # ✅ ЕСЛИ ДОЗВОЛЕНО ЗАДАВАТЬ ПИТАННЯ - ДОДАЄМО ПИТАННЯ ЗІ СТЕЙДЖУ
+            print(f"✅ [FORCE_QUESTION] Дозволено задавати питання (may_ask_question={may_ask_question}). Додаємо питання зі стейджу.")
+            log_info(f"✅ [FORCE_QUESTION] Дозволено задавати питання (may_ask_question={may_ask_question}). Додаємо питання зі стейджу.")
             
             # 🔥 ИСПОЛЬЗУЕМ ПРАВИЛЬНЫЙ next_theme_slot ИЗ STAGE_CONTROLLER
             next_theme_slot = state.get("next_theme_slot", {})

@@ -153,19 +153,35 @@ class AgataPromptLoader:
         """Создает системный промпт, используя новый живой стиль общения"""
         
         # Загружаем новый системный промпт из config/prompts/system_core.txt
-        system_core_path = "config/prompts/system_core.txt"
+        # Використовуємо абсолютний шлях
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        system_core_path = os.path.join(base_dir, "config", "prompts", "system_core.txt")
+        
+        logger.info(f"🔍 [DEBUG] Пытаемся загрузить system_core.txt из: {system_core_path}")
+        logger.info(f"🔍 [DEBUG] Файл существует: {os.path.exists(system_core_path)}")
+        
         if os.path.exists(system_core_path):
             try:
                 with open(system_core_path, 'r', encoding='utf-8') as f:
                     system_prompt = f.read().strip()
+                    logger.info(f"✅ [DEBUG] Успешно загружен system_core.txt: {len(system_prompt)} символов")
+                    logger.info(f"✅ [DEBUG] Первые 200 символов: {system_prompt[:200]}")
+                    
                     # Добавляем информацию о дне в промпт
                     day_prompt = self._get_day_prompt(day_number)
                     day_info = f"\n\n=== ТЕКУЩИЙ ДЕНЬ ОБЩЕНИЯ ===\n{day_prompt}\n"
                     system_prompt = system_prompt.replace("=== ТЕКУЩИЙ ЭТАП ОБЩЕНИЯ ===", f"{day_info}=== ТЕКУЩИЙ ЭТАП ОБЩЕНИЯ ===")
-                    logger.info(f"Загружен новый системный промпт из {system_core_path} с днем {day_number}")
+                    
+                    if memory_context and memory_context.strip():
+                        system_prompt = f"{system_prompt}\n\n=== ДОПОЛНИТЕЛЬНЫЕ ИНСТРУКЦИИ ===\n{memory_context}"
+                        logger.info(f"✅ Добавлен memory_context с инструкциями: {len(memory_context)} символов")
+                    
+                    logger.info(f"✅ Загружен новый системный промпт из {system_core_path} с днем {day_number}")
                     return system_prompt
             except Exception as e:
-                logger.error(f"Ошибка загрузки {system_core_path}: {e}")
+                logger.error(f"❌ Ошибка загрузки {system_core_path}: {e}")
+        else:
+            logger.error(f"❌ Файл не найден: {system_core_path}")
         
         # Fallback к старому методу
         logger.warning("Используем fallback системный промпт")
@@ -260,7 +276,9 @@ class AgataPromptLoader:
             else:
                 prompt_file = "day_30.txt"  # Для дней 30+ используем day_30
             
-            prompt_path = os.path.join("config", "prompts", prompt_file)
+            # Використовуємо абсолютний шлях
+            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            prompt_path = os.path.join(base_dir, "app", "config", "prompts", prompt_file)
             
             if os.path.exists(prompt_path):
                 with open(prompt_path, 'r', encoding='utf-8') as f:

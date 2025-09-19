@@ -134,7 +134,10 @@ class QuestionFilter:
         # 5. Убираем двойные точки
         result = re.sub(r'\.+', '.', result)
         
-        # 6. Убираем лишние пробелы
+        # 6. ФИКС: НЕ ДОДАЄМО КРАПКУ ПЕРЕД ЗНАКОМ ОКЛИКУ
+        result = result.replace('.!', '!')
+        
+        # 7. Убираем лишние пробелы
         result = re.sub(r'\s+', ' ', result).strip()
         
         return result
@@ -165,9 +168,17 @@ class QuestionFilter:
                 separator = sentences[i + 1]
                 if '?' in separator:
                     separator = separator.replace('?', '.')
-                result_parts.append(separator)
+                # НЕ ДОДАЄМО КРАПКУ ПЕРЕД ЗНАКОМ ОКЛИКУ
+                if separator.strip() == '!' and not converted.endswith('.'):
+                    converted_with_separator = converted + separator
+                    result_parts[-1] = converted_with_separator  # Замінюємо останній елемент
+                else:
+                    result_parts.append(separator)
                 i += 2
             else:
+                # Додаємо крапку в кінець, якщо немає
+                if not converted.endswith('.') and not converted.endswith('!'):
+                    result_parts[-1] = converted + '.'
                 i += 1
         
         return ''.join(result_parts)
@@ -198,7 +209,7 @@ class QuestionFilter:
             result = re.sub(pattern, '', result, flags=re.IGNORECASE)
         
         result = result.strip()
-        if result and not result.endswith('.'):
+        if result and not result.endswith('.') and not result.endswith('!'):
             result += '.'
         
         return result if result else 'Хорошо.'

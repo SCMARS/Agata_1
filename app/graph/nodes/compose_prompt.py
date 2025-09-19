@@ -48,40 +48,20 @@ class ComposePromptNode:
         Returns:
             True если нужно поздороваться
         """
-        # Проверяем есть ли краткосрочная память (недавние сообщения)
-        memory_context = state.get("memory_context", "")
+        # 🔥 ИСПРАВЛЕНИЕ: Используем правильный подсчет сообщений пользователя
+        user_messages = [msg for msg in state.get("messages", []) if msg.get("role") == "user"]
+        user_message_count = len(user_messages)
         
-        # Если в памяти есть недавние сообщения - это продолжение диалога
-        if "Недавние сообщения:" in memory_context:
-            # Считаем количество недавних сообщений
-            lines = memory_context.split('\n')
-            recent_message_lines = []
-            in_recent_section = False
-            
-            for line in lines:
-                if "Недавние сообщения:" in line:
-                    in_recent_section = True
-                    continue
-                elif line.startswith("👤") or line.startswith("🤖"):
-                    if in_recent_section:
-                        recent_message_lines.append(line)
-                elif in_recent_section and line.strip() and not line.startswith("👤") and not line.startswith("🤖"):
-                    break  # Конец секции недавних сообщений
-            
-            # Если есть больше 1 недавнего сообщения - это диалог
-            if len(recent_message_lines) > 1:
-                logger.info(f"🚫 [GREETING] НЕ здороваемся - продолжение диалога ({len(recent_message_lines)} сообщений)")
-                return False
-        
-        # Здороваемся если:
-        # 1. Прошло больше 6 часов (21600 сек)
-        # 2. Или это первое сообщение (нет памяти)
-        should_greet = last_diff_sec > 21600 or not memory_context.strip()
+
+        should_greet = (user_message_count == 1) or (last_diff_sec > 21600)
         
         if should_greet:
-            logger.info(f"👋 [GREETING] Здороваемся - прошло {last_diff_sec//3600}ч или первое сообщение")
+            if user_message_count == 1:
+                logger.info(f"👋 [GREETING] Здороваемся - ПЕРВОЕ сообщение пользователя")
+            else:
+                logger.info(f"👋 [GREETING] Здороваемся - долгое отсутствие ({last_diff_sec//3600}ч)")
         else:
-            logger.info(f"🚫 [GREETING] НЕ здороваемся - прошло только {last_diff_sec//3600}ч")
+            logger.info(f"🚫 [GREETING] НЕ здороваемся - сообщение #{user_message_count}, прошло {last_diff_sec//3600}ч")
             
         return should_greet
     
@@ -141,7 +121,7 @@ class ComposePromptNode:
         user_id = state.get("user_id", "unknown")
         
         # Базовая информация о времени
-        time_info = TimeUtils.get_time_context(current_time)
+        time_info = TimeUtils.get_time_context(current_time, should_include_greeting=should_greet)
         
         # Определяем день недели и дату
         weekday_names = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
@@ -503,6 +483,7 @@ class ComposePromptNode:
             logger.info(f"🔍 [DEBUG-DYNAMIC] memory_context есть: {bool(memory_context)}")
             if memory_context:
                 logger.info(f"🔥 ИСПОЛЬЗУЕМ динамический путь с расчетом времени")
+                print(f"🔥 [DYNAMIC_PATH] ВХОДИМ В ДИНАМИЧЕСКИЙ ПУТЬ! memory_context: {len(memory_context)} символов")
                 
                 # Расчет времени последней активности
                 logger.info(f"🔍 [TIME-DEBUG] Вызываем _get_real_last_activity...")
@@ -638,6 +619,7 @@ class ComposePromptNode:
                     "short_memory_summary": final_short_summary,
                     "long_memory_facts": final_long_facts,
                     "semantic_context": final_semantic_context,
+                    "facts_and_context": final_semantic_context, 
                     "day_instructions": "",
                     "behavior_style": behavioral_instructions,
                     "agatha_bio": agatha_bio,
@@ -646,19 +628,20 @@ class ComposePromptNode:
                     "day_number": day_number,
                     "last_diff_sec": last_diff_sec,
                     "may_ask_question": may_ask_question,
+                    "user_message_count": user_message_count,  # Загальна кількість повідомлень користувача
+                    "current_message_number": user_message_count,  # Номер поточного повідомлення (той самий)
                     "time_greeting": time_greeting,
                     "absence_comment": absence_comment,
                     "response_structure_instructions": response_structure_instructions,
                     "stage_progress": stage_progress.get("stage_name", "Stage 1") if stage_progress else "Stage 1",
                     "next_theme_slot": next_theme_slot.get("next_slot", "общий вопрос") if next_theme_slot else "общий вопрос",
-                    "full_stage_text": full_stage_text,  # 🔥 ПОВНИЙ ТЕКСТ СТЕЙДЖУ
-                    "time_questions": time_questions,    # ⏰ ЧАСОВІ ПИТАННЯ
-                    "daily_schedule": daily_schedule     # 📅 РОЗПОРЯДОК ДНЯ
+                    "full_stage_text": full_stage_text,
+                    "time_questions": time_questions,    
+                    "daily_schedule": daily_schedule,
+                    "current_message_number": user_message_count 
                 }.items():
                     system_prompt_with_vars = system_prompt_with_vars.replace(f"{{{var}}}", str(value))
                 
-                # Создаем шаблон с актуальным системным промптом
-                # Добавляем явную инструкцию о точном вопросе в user prompt
                 question_instruction = ""
                 if may_ask_question and next_theme_slot and "next_slot" in next_theme_slot:
                     specific_question = next_theme_slot["next_slot"]
@@ -700,7 +683,7 @@ class ComposePromptNode:
                 }
                 
                 logger.info(f"✅ Динамический промпт составлен для пользователя {user_id}")
-                
+                print(f"✅ [DYNAMIC_PATH] УСПЕХ! ВОЗВРАЩАЕМ РЕЗУЛЬТАТ с system_prompt_used=True")
                 
                 return updated_state
             
@@ -821,15 +804,13 @@ class ComposePromptNode:
         # Создаем детальные инструкции
         instructions = [base_instruction]
         
-        # Нейтральный холодный старт (первый контакт)
+        # Первый контакт - используем system_core.txt правила
         if is_first_contact:
-            instructions.append("ПЕРВОЕ СООБЩЕНИЕ: максимально нейтрально и коротко (1 короткая фраза), без эмоций и без вопросов.")
-            instructions.append("Запрещены восклицания, эмодзи, тёплые формулы приветствия. Примеры: 'Привет' / 'Ну привет' / 'Окей'.")
-            # Возвращаем сразу, чтобы правила были жёсткими в первый ход
+            # НЕ добавляем конфликтующие инструкции - используем только system_core.txt
             return "\n".join(instructions)
         
-        # ДЛЯ ВСЕХ ОСТАЛЬНЫХ СООБЩЕНИЙ: НЕ НАЧИНАЙ С ПРИВЕТСТВИЙ
-        instructions.append("НЕ НАЧИНАЙ сообщения со слов 'Привет', 'Добрый день', 'Здравствуй' и т.п.")
+        # ДЛЯ ВСЕХ ОСТАЛЬНЫХ СООБЩЕНИЙ: СЛЕДУЙ ПРАВИЛАМ ИЗ system_core.txt
+        # instructions.append("НЕ НАЧИНАЙ сообщения со слов 'Привет', 'Добрый день', 'Здравствуй' и т.п.")  # ВИДАЛЕНО: конфлікт з system_core.txt
         instructions.append("Отвечай сразу по существу, как в обычном разговоре.")
         
         # ЕСТЕСТВЕННЫЕ И ЧЕЛОВЕЧНЫЕ ОТВЕТЫ
@@ -838,7 +819,6 @@ class ComposePromptNode:
         instructions.append("Добавляй личные реакции и эмоции - ты живая девушка, не робот!")
         instructions.append("Реагируй на время суток: утром говори про кофе и работу, вечером про отдых и планы.")
         instructions.append("Каждый ответ должен быть УНИКАЛЬНЫМ - не повторяй одни и те же фразы!")
-        instructions.append("НИКОГДА не начинай с 'Привет!' после первого сообщения - это роботично!")
         instructions.append("Начинай сразу с реакции на то, что сказал пользователь!")
         
         # ХАРАКТЕР И ЭМОЦИИ

@@ -321,17 +321,23 @@ class ProductionTelegramBot:
         if user_id not in self.user_message_buffers:
             self.user_message_buffers[user_id] = {
                 'messages': [],
+                'conversation_history': [],  # 🔥 ДОДАЄМО ПОВНУ ІСТОРІЮ РОЗМОВИ
                 'last_message_time': None,
                 'timer_task': None
             }
         
         # Добавляем сообщение в буфер
         current_time = datetime.now()
-        self.user_message_buffers[user_id]['messages'].append({
+        user_message = {
             "role": "user", 
             "content": message_text,
             "timestamp": current_time
-        })
+        }
+        self.user_message_buffers[user_id]['messages'].append(user_message)
+        
+        # 🔥 ДОДАЄМО В ІСТОРІЮ РОЗМОВИ
+        self.user_message_buffers[user_id]['conversation_history'].append(user_message)
+        
         self.user_message_buffers[user_id]['last_message_time'] = current_time
         
         self.logger.info(f"📝 Добавлено сообщение в буфер для {user_id}: '{message_text}'")
@@ -366,13 +372,16 @@ class ProductionTelegramBot:
             
             self.logger.info(f"⏰ Обрабатываем {len(messages)} буферизованных сообщений для {user_id}")
             
-            # Отправляем все сообщения в чат API
+            # 🔥 ВІДПРАВЛЯЄМО ПОВНУ ІСТОРІЮ РОЗМОВИ В API
+            full_history = self.user_message_buffers[user_id]['conversation_history']
+            self.logger.info(f"📚 Передаємо в API {len(full_history)} повідомлень з історії")
+            
             async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
                 response = await client.post(
                     f"{self.api_base_url}/api/chat",
                     json={
                         "user_id": str(user_id),
-                        "messages": [{"role": msg["role"], "content": msg["content"]} for msg in messages]
+                        "messages": [{"role": msg["role"], "content": msg["content"]} for msg in full_history]
                     }
                 )
             
@@ -385,6 +394,13 @@ class ProductionTelegramBot:
                 
                 self.logger.info(f"🧠 Получены части ответа: {len(parts)}")
                 
+                # 🔥 ЗБЕРІГАЄМО ВІДПОВІДІ АГАТИ В ІСТОРІЮ
+                agatha_response = " ".join(parts)
+                self.user_message_buffers[user_id]['conversation_history'].append({
+                    "role": "assistant",
+                    "content": agatha_response,
+                    "timestamp": datetime.now()
+                })
 
                 for i, part in enumerate(parts):
                     # Используем задержку из API или стандартную

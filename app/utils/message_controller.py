@@ -486,22 +486,23 @@ class MessageController:
             'neutral': ['🙂', '😌', '🤍']
         }
         
-        # Добавляем эмодзи с небольшой вероятностью
-        if random.random() < 0.3:  # 30% шанс добавить эмодзи
-            emojis = strategy_emojis.get(strategy, ['😊'])
-            if mood in mood_emojis:
-                emojis.extend(mood_emojis[mood])
-            
-            emoji = random.choice(emojis)
-            
-            # Добавляем эмодзи в конец или в середину
-            if random.random() < 0.7:  # 70% в конец
-                content += f" {emoji}"
-            else:  # 30% в подходящее место в середине
-                sentences = content.split('. ')
-                if len(sentences) > 1:
-                    insert_pos = random.randint(0, len(sentences) - 1)
-                    sentences[insert_pos] += f" {emoji}"
-                    content = '. '.join(sentences)
+        # ОТКЛЮЧЕНО: НЕ добавляем эмодзи согласно новым правилам
+        # if random.random() < 0.3:  # 30% шанс добавить эмодзи
+        #     emojis = strategy_emojis.get(strategy, ['😊'])
+        #     if mood in mood_emojis:
+        #         emojis.extend(mood_emojis[mood])
+        #     
+        #     emoji = random.choice(emojis)
+        #     
+        #     # Добавляем эмодзи в конец или в середину
+        #     if random.random() < 0.7:  # 70% в конец
+        #         content += f" {emoji}"
+        # ОТКЛЮЧЕНО: НЕ добавляем эмодзи в середину текста
+        # else:  # 30% в подходящее место в середине
+        #     sentences = content.split('. ')
+        #     if len(sentences) > 1:
+        #         insert_pos = random.randint(0, len(sentences) - 1)
+        #         sentences[insert_pos] += f" {emoji}"
+        #         content = '. '.join(sentences)
         
         return content 
