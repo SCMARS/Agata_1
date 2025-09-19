@@ -37,11 +37,13 @@ class AgataPromptLoader:
         return ""
 
     def load_persona_bio(self) -> str:
-
+        """Загружает полную биографию Агаты из всех файлов persona + character"""
         if 'full_bio' in self.persona_cache:
             return self.persona_cache['full_bio']
             
         persona_dir = self.base_path / "persona"
+        character_dir = self.base_path / "character"
+        
         if not persona_dir.exists():
             logger.error(f"Директория persona не найдена: {persona_dir}")
             return self._get_fallback_bio()
@@ -71,6 +73,18 @@ class AgataPromptLoader:
                             logger.info(f"Загружен файл биографии: {filename}")
                 except Exception as e:
                     logger.error(f"Ошибка загрузки {filename}: {e}")
+        
+        # Додаємо детальний характер з character папки
+        character_file = character_dir / "agatha_character_detailed.txt"
+        if character_file.exists():
+            try:
+                with open(character_file, 'r', encoding='utf-8') as f:
+                    character_content = f.read().strip()
+                    if character_content:
+                        bio_parts.append(f"=== ДЕТАЛЬНИЙ ХАРАКТЕР ===\n{character_content}")
+                        logger.info("Загружен детальный характер: agatha_character_detailed.txt")
+            except Exception as e:
+                logger.error(f"Ошибка загрузки agatha_character_detailed.txt: {e}")
         
         if not bio_parts:
             logger.warning("Не удалось загрузить файлы биографии, используем fallback")
@@ -230,15 +244,21 @@ class AgataPromptLoader:
     def _get_day_prompt(self, day_number: int) -> str:
         """Получить промпт для конкретного дня"""
         try:
-            # Определяем файл промпта для дня
-            if day_number <= 7:
-                prompt_file = f"day_{day_number}.txt"
-            elif day_number <= 14:
+            # Определяем файл промпта для дня - используем ВСЕ доступные файлы
+            if day_number == 1:
+                prompt_file = "day_1.txt"
+            elif day_number == 2:
+                prompt_file = "day_2.txt"
+            elif day_number <= 7:
                 prompt_file = "day_7.txt"
+            elif day_number == 14:
+                prompt_file = "day_14.txt"
+            elif day_number == 30:
+                prompt_file = "day_30.txt"
             elif day_number <= 30:
-                prompt_file = "day_7.txt"  # Используем day_7 для всех дней 8-30
+                prompt_file = "day_14.txt"  # Для дней 15-29 используем day_14
             else:
-                prompt_file = "day_7.txt"  # Для дней 30+
+                prompt_file = "day_30.txt"  # Для дней 30+ используем day_30
             
             prompt_path = os.path.join("config", "prompts", prompt_file)
             

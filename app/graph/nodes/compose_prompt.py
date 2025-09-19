@@ -482,7 +482,7 @@ class ComposePromptNode:
             
 
 
-            # Согласно стейджу: вопросы на 2-е, 4-е, 6-е, 8-е, 10-е, 12-е сообщение
+
             may_ask_question = (user_message_count % 2) == 0 and user_message_count >= 2
             
             # ОТЛАДКА: выводим информацию о подсчете
@@ -611,9 +611,9 @@ class ComposePromptNode:
                     time_period = "вечер"
 
                 if stage_controller:
-                    full_stage_text = stage_progress.get("full_stage_text", "")
-                    if not full_stage_text:
-                        full_stage_text = stage_controller._load_full_stage_content(current_stage_number)
+                    # Оптимізація: не завантажуємо повний текст стейджу
+                    full_stage_text = ""  # Відключаємо довгий промпт
+                    # full_stage_text = stage_controller._load_full_stage_content(current_stage_number)
                     
                     # Часові питання
                     time_questions_dict = stage_controller.get_time_based_questions(current_stage_number)
@@ -834,7 +834,7 @@ class ComposePromptNode:
         
         # ЕСТЕСТВЕННЫЕ И ЧЕЛОВЕЧНЫЕ ОТВЕТЫ
         instructions.append("ИЗБЕГАЙ роботических фраз типа 'Приятно слышать', 'У тебя, наверное, есть много интересных историй'.")
-        instructions.append("Говори естественно: 'Круто!', 'Классно!', 'Ого!', 'Вау!', 'Серьезно?'")
+        instructions.append("Говори естественно: 'Круто', 'Классно', 'Ого', 'Вау', 'Серьезно?'")
         instructions.append("Добавляй личные реакции и эмоции - ты живая девушка, не робот!")
         instructions.append("Реагируй на время суток: утром говори про кофе и работу, вечером про отдых и планы.")
         instructions.append("Каждый ответ должен быть УНИКАЛЬНЫМ - не повторяй одни и те же фразы!")

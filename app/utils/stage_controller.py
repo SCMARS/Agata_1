@@ -479,7 +479,7 @@ class StageController:
             "max_questions_per_session": stage_rules.get("max_questions_per_session", 1),
             "response_structure": stage_rules.get("response_structure", {}),
             "transition_markers": stage_rules.get("transition_markers", []),
-            "full_stage_text": full_stage_content  # 🔥 ДОДАЄМО ПОВНИЙ ТЕКСТ СТЕЙДЖУ
+            "full_stage_text": ""  # 🔥 ОПТИМІЗАЦІЯ: відключаємо довгий промпт
         }
         
         logger.info(f"📊 [STAGE_PROGRESS] {user_id}: Стейдж {stage_number} ({progress['stage_name']})")

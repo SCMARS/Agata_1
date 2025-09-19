@@ -17,16 +17,6 @@ class SmartSlotAnalyzer:
         self.model = os.getenv("LLM_MODEL", "gpt-3.5-turbo")
         
     async def analyze_user_response(self, user_message: str, available_questions: List[str]) -> Dict[str, Any]:
-        """
-        Аналізує відповідь користувача і визначає, на які питання було дано відповідь
-        
-        Args:
-            user_message: Повідомлення користувача
-            available_questions: Список доступних питань для аналізу
-            
-        Returns:
-            Dict з результатами аналізу
-        """
         if not user_message or len(user_message.strip()) < 2:
             return {"answered_questions": [], "confidence": 0.0}
             

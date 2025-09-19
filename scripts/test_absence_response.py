@@ -7,7 +7,7 @@ from langchain_openai import ChatOpenAI
 
 class FakeMemoryManager:
     def get_last_activity_time(self):
-        # 2 days ago
+
         return datetime.utcnow() - timedelta(days=2, hours=1)
 
 
